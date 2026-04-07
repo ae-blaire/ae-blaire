@@ -325,19 +325,18 @@ export default function DashboardPage() {
         return status;
     }
   }
-
-  function getRiskLabel(riskType: Exclude<RiskType, null>) {
-    switch (riskType) {
-      case "today_unprepared":
-        return "🚨 오늘 일정 준비 부족";
-      case "urgent_no_slot":
-        return "🔥 긴급 / 슬롯 없음";
-      case "confirmed_unprepared":
-        return "⚠️ 준비 부족";
-      default:
-        return "위험";
-    }
+function getRiskLabel(riskType: string) {
+  switch (riskType) {
+    case "today_unprepared":
+      return "🚨 오늘 일정 준비 부족";
+    case "urgent_no_slot":
+      return "🔥 긴급 / 슬롯 없음";
+    case "confirmed_unprepared":
+      return "⚠️ 준비 부족";
+    default:
+      return "위험";
   }
+}
 
   function formatDuration(minutes: number | null) {
     if (!minutes) return "-";

@@ -126,15 +126,20 @@ export default function SlotCandidatesSection({
     }
   }, [startTime, endTime, timeOptions]);
 
-  const rankedSlots = useMemo(() => {
-    const ranked = rankSlots(request ?? {}, slots);
+const rankedSlots = useMemo(() => {
+  const normalizedSlots = slots.map((slot) => ({
+    ...slot,
+    id: slot.id ?? undefined,
+  }));
 
-    return ranked.sort((a, b) => {
-      if (a.slot.is_selected && !b.slot.is_selected) return -1;
-      if (!a.slot.is_selected && b.slot.is_selected) return 1;
-      return b.score - a.score;
-    });
-  }, [request, slots]);
+  const ranked = rankSlots(request ?? {}, normalizedSlots);
+
+  return ranked.sort((a, b) => {
+    if (a.slot.is_selected && !b.slot.is_selected) return -1;
+    if (!a.slot.is_selected && b.slot.is_selected) return 1;
+    return b.score - a.score;
+  });
+}, [request, slots]);
 
   const selectedSlot = useMemo(() => {
     return slots.find((slot) => slot.is_selected) || null;

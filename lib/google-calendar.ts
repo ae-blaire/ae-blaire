@@ -100,9 +100,18 @@ export async function fetchGoogleCalendarFreeBusy({
     cache: "no-store",
   });
 
-  const result = (await response.json()) as GoogleFreeBusyResponse & {
-    error?: { message?: string };
-  };
+const result = (await response.json()) as {
+  error?: { message?: string };
+  calendars?: Record<
+    string,
+    {
+      busy?: Array<{
+        start: string;
+        end: string;
+      }>;
+    }
+  >;
+};
 
   if (!response.ok) {
     throw new Error(
