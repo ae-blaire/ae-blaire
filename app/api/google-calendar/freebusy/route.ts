@@ -17,14 +17,27 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as FreeBusyRequestBody;
 
-    if (!isValidIsoDateTime(body.timeMin) || !isValidIsoDateTime(body.timeMax)) {
+    const timeMin =
+      typeof body.timeMin === "string" ? body.timeMin : "";
+    const timeMax =
+      typeof body.timeMax === "string" ? body.timeMax : "";
+    const timeZone =
+      typeof body.timeZone === "string" && body.timeZone
+        ? body.timeZone
+        : "Asia/Seoul";
+
+    if (!isValidIsoDateTime(timeMin) || !isValidIsoDateTime(timeMax)) {
       return NextResponse.json(
         { error: "timeMin and timeMax must be valid ISO datetime strings" },
         { status: 400 }
       );
     }
 
-    const attendeeEmails = (body.attendeeEmails || [])
+    const attendeeEmails = (Array.isArray(body.attendeeEmails)
+      ? body.attendeeEmails
+      : []
+    )
+      .filter((email): email is string => typeof email === "string")
       .map((email) => email.trim().toLowerCase())
       .filter(Boolean);
 
@@ -36,17 +49,17 @@ export async function POST(req: NextRequest) {
     }
 
     const attendees = await fetchGoogleCalendarTimedBusyEvents({
-      timeMin: body.timeMin,
-      timeMax: body.timeMax,
-      timeZone: body.timeZone || "Asia/Seoul",
+      timeMin,
+      timeMax,
+      timeZone,
       calendarIds: attendeeEmails,
     });
 
     return NextResponse.json({
       ok: true,
-      timeMin: body.timeMin,
-      timeMax: body.timeMax,
-      timeZone: body.timeZone || "Asia/Seoul",
+      timeMin,
+      timeMax,
+      timeZone,
       attendees,
       note: "All-day events and transparent events are excluded from recommendation busy calculations.",
     });
