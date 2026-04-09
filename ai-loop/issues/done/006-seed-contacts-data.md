@@ -46,7 +46,8 @@ SELECT * FROM contacts ORDER BY name;
 
 - 결과
   - contacts 테이블에 초기 데이터 입력 완료
-  - autocomplete 테스트 가능 상태 확보
+  - 배포 환경의 `/api/contacts/search`에서 정상 응답 확인
+  - 실제 화면에서 `김블` 입력 시 autocomplete 드롭다운 표시 확인
 
 ────────────────────────
 
@@ -55,8 +56,13 @@ SELECT * FROM contacts ORDER BY name;
 - 코드 변경 없이 autocomplete 검증이 가능함
 - admin UI 또는 CSV 업로드는 필요 시 별도 이슈로 분리하는 것이 적절함
 
+- contacts 테이블 초기 데이터가 정상적으로 입력됨
+- 배포 환경에서 `/api/contacts/search?query=김` 호출 시 정상 JSON 응답 확인
+- 실제 신규 요청/편집 화면에서 검색어 입력 시 autocomplete 드롭다운이 표시됨
+- 따라서 contacts 데이터 시딩 및 실사용 검증이 완료되었고 done 처리 가능
+
 ────────────────────────
 
 ## 완료
-- 종료 유형:
-- 요약:
+- 종료 유형: fixed
+- 요약: contacts 테이블에 초기 데이터를 시딩하고 배포 환경에서 API 및 autocomplete 동작을 확인하여 내부 연락처 검색 기능을 실사용 가능한 상태로 만듦

@@ -20,6 +20,9 @@ export default function Sidebar() {
         <p>
           <Link href="/new-request">New Request</Link>
         </p>
+        <p>
+          <Link href="/contacts">Contacts</Link>
+        </p>
       </div>
     </div>
   );
