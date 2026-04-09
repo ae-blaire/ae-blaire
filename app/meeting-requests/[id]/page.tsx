@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import SlotCandidatesSection from "@/components/slot-candidates-section";
 import RiskBadge from "@/components/RiskBadge";
+import ContactSearchInput from "@/components/ContactSearchInput";
 import {
   canConfirmRequest,
   canCompleteRequest,
@@ -18,11 +19,11 @@ import { deleteMeetingRequestWithRelations } from "@/lib/delete-meeting-request"
 import {
   buildParticipantsStorageValueFromEmailMap,
   getParticipantNameKey,
-  getParticipantEmailsList,
   getParticipantsDisplayText,
   normalizeParticipantName,
   parseParticipants,
   parseParticipantNamesText,
+  pruneParticipantEmailMap,
 } from "@/lib/participants";
 import toast from "react-hot-toast";
 
@@ -81,6 +82,25 @@ type GeneratedSlot = {
   window_end: string;
 };
 
+type GeneratedSlotDiagnostics = {
+  preferredRangeRaw: string | null;
+  parsedRangeLabel: string | null;
+  durationMinutes: number | null;
+  effectiveDurationMinutes: number;
+  availabilityItemsCount: number;
+  weekdayRangeDays: number;
+  rawCandidateCount: number;
+  availableCandidateCount: number;
+  groupedWindowCount: number;
+  finalRecommendationCount: number;
+  zeroReason:
+    | "missing_range"
+    | "missing_availability"
+    | "no_weekdays_in_range"
+    | "no_common_slots"
+    | null;
+};
+
 type AvailabilityItem = {
   email: string;
   busy: Array<{
@@ -103,7 +123,7 @@ type AvailabilityLookupSummary = {
 type ParticipantSearchResult = {
   name: string;
   email: string;
-  organization: string | null;
+  organization?: string | null;
 };
 
 type ParticipantEmailMap = Record<string, string>;
@@ -169,17 +189,42 @@ function buildParticipantEmailMap(value: unknown) {
 function parsePreferredDateRange(value: string | null) {
   if (!value) return null;
 
-  const matches = value.match(/\d{4}-\d{2}-\d{2}/g);
-  if (!matches || matches.length === 0) return null;
+  const yearMatches = Array.from(
+    value.matchAll(
+      /(\d{4})\s*(?:년|[./-])\s*(\d{1,2})\s*(?:월|[./-])\s*(\d{1,2})\s*(?:일)?/g
+    )
+  );
+  const toDate = (year: number, month: number, day: number) =>
+    new Date(year, month - 1, day, 0, 0, 0, 0);
 
-  const start = new Date(`${matches[0]}T00:00:00`);
-  const end = new Date(`${matches[matches.length - 1]}T00:00:00`);
+  let dates: Date[] = yearMatches.map((match) =>
+    toDate(Number(match[1]), Number(match[2]), Number(match[3]))
+  );
+
+  if (dates.length === 0) {
+    const currentYear = new Date().getFullYear();
+    const monthDayMatches = Array.from(
+      value.matchAll(/(\d{1,2})\s*(?:월|[./-])\s*(\d{1,2})\s*(?:일)?/g)
+    );
+
+    dates = monthDayMatches.map((match) =>
+      toDate(currentYear, Number(match[1]), Number(match[2]))
+    );
+  }
+
+  if (dates.length === 0) return null;
+  const start = dates[0];
+  const end = dates[dates.length - 1];
 
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     return null;
   }
 
   return start <= end ? { start, end } : { start: end, end: start };
+}
+
+function getEffectiveDurationMinutes(value: number | null | undefined) {
+  return value && value > 0 ? value : 60;
 }
 
 function isSlotBusy(
@@ -258,6 +303,62 @@ function formatTimeRangeLabel(start: string, end: string) {
   return `${formatPart(startDate)}~${formatPart(endDate)}`;
 }
 
+function buildResolvedParticipantContacts(
+  participantsValue: unknown,
+  lookupSummary: AvailabilityLookupSummary | null
+) {
+  const merged = parseParticipants(participantsValue).map((participant) => ({
+    name: normalizeParticipantName(participant.name),
+    email: participant.email?.trim().toLowerCase() || null,
+  }));
+
+  const autoMappedByName = new Map(
+    (lookupSummary?.autoMapped || []).map((item) => [
+      getParticipantNameKey(item.name),
+      item.email.trim().toLowerCase(),
+    ])
+  );
+
+  const seenEmails = new Set<string>();
+  const seenNames = new Set<string>();
+
+  return merged.reduce<Array<{ name: string; email: string | null }>>((acc, participant) => {
+    const name = normalizeParticipantName(participant.name);
+    const nameKey = getParticipantNameKey(name);
+    const email = participant.email || autoMappedByName.get(nameKey) || null;
+    const emailKey = email?.trim().toLowerCase() || null;
+
+    if (!name) return acc;
+    if (emailKey && seenEmails.has(emailKey)) return acc;
+    if (!emailKey && seenNames.has(nameKey)) return acc;
+
+    seenNames.add(nameKey);
+    if (emailKey) seenEmails.add(emailKey);
+
+    acc.push({ name, email: emailKey });
+    return acc;
+  }, []);
+}
+
+function getAvailabilityUserMessage(params: {
+  warning?: string | null;
+  error?: string | null;
+  attendeesCount?: number;
+}) {
+  const { warning, error, attendeesCount = 0 } = params;
+
+  if (warning) return warning;
+
+  const normalizedError = error?.trim().toLowerCase() || "";
+  if (normalizedError.includes("not found")) {
+    return attendeesCount > 0
+      ? "일부 참석자의 캘린더를 조회할 수 없었어요. 권한 또는 캘린더 ID를 확인해주세요."
+      : "참석자 캘린더를 조회하지 못했어요. 권한 또는 캘린더 ID를 확인해주세요.";
+  }
+
+  return error || "availability 조회 중 오류가 발생했어요.";
+}
+
 type InternalGeneratedSlot = {
   start_datetime: string;
   end_datetime: string;
@@ -319,7 +420,16 @@ function groupGeneratedSlotsByWindow(slots: InternalGeneratedSlot[]) {
   return groups;
 }
 
-function generateRecommendedSlots({
+function formatDateRangeDebugLabel(start: Date, end: Date) {
+  const format = (value: Date) =>
+    `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(
+      value.getDate()
+    ).padStart(2, "0")}`;
+
+  return `${format(start)} ~ ${format(end)}`;
+}
+
+function getGeneratedSlotRecommendationResult({
   preferredRange,
   durationMinutes,
   availabilityItems,
@@ -329,14 +439,51 @@ function generateRecommendedSlots({
   durationMinutes: number | null;
   availabilityItems: AvailabilityItem[];
   limit?: number;
-}): GeneratedSlot[] {
+}): {
+  slots: GeneratedSlot[];
+  diagnostics: GeneratedSlotDiagnostics;
+} {
   const parsedRange = parsePreferredDateRange(preferredRange);
+  const effectiveDurationMinutes = getEffectiveDurationMinutes(durationMinutes);
+  const baseDiagnostics: GeneratedSlotDiagnostics = {
+    preferredRangeRaw: preferredRange,
+    parsedRangeLabel: parsedRange
+      ? formatDateRangeDebugLabel(parsedRange.start, parsedRange.end)
+      : null,
+    durationMinutes,
+    effectiveDurationMinutes,
+    availabilityItemsCount: availabilityItems.length,
+    weekdayRangeDays: 0,
+    rawCandidateCount: 0,
+    availableCandidateCount: 0,
+    groupedWindowCount: 0,
+    finalRecommendationCount: 0,
+    zeroReason: null,
+  };
 
-  if (!parsedRange || !durationMinutes || durationMinutes <= 0 || availabilityItems.length === 0) {
-    return [];
+  if (!parsedRange) {
+    return {
+      slots: [],
+      diagnostics: {
+        ...baseDiagnostics,
+        zeroReason: "missing_range",
+      },
+    };
+  }
+
+  if (availabilityItems.length === 0) {
+    return {
+      slots: [],
+      diagnostics: {
+        ...baseDiagnostics,
+        zeroReason: "missing_availability",
+      },
+    };
   }
 
   const generatedSlots: InternalGeneratedSlot[] = [];
+  let rawCandidateCount = 0;
+  let weekdayRangeDays = 0;
 
   for (
     let currentDate = new Date(parsedRange.start);
@@ -345,6 +492,7 @@ function generateRecommendedSlots({
   ) {
     const day = currentDate.getDay();
     if (day === 0 || day === 6) continue;
+    weekdayRangeDays += 1;
 
     for (let hour = 7; hour < 20; hour += 1) {
       for (let minute = 0; minute < 60; minute += 30) {
@@ -357,7 +505,7 @@ function generateRecommendedSlots({
           0,
           0
         );
-        const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
+        const end = new Date(start.getTime() + effectiveDurationMinutes * 60 * 1000);
         const dayEnd = new Date(
           currentDate.getFullYear(),
           currentDate.getMonth(),
@@ -372,6 +520,7 @@ function generateRecommendedSlots({
           continue;
         }
 
+        rawCandidateCount += 1;
         const startDatetime = start.toISOString();
         const endDatetime = end.toISOString();
 
@@ -390,7 +539,8 @@ function generateRecommendedSlots({
     }
   }
 
-  return groupGeneratedSlotsByWindow(generatedSlots)
+  const groupedSlots = groupGeneratedSlotsByWindow(generatedSlots);
+  const recommendedSlots = groupedSlots
     .map((group) => {
       const representative = [...group.candidates].sort((a, b) => {
         if (a.priority !== b.priority) return a.priority - b.priority;
@@ -430,7 +580,27 @@ function generateRecommendedSlots({
         new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime()
       );
     })
-    .slice(0, limit)
+    .slice(0, limit);
+
+  const zeroReason =
+    weekdayRangeDays === 0
+      ? "no_weekdays_in_range"
+      : recommendedSlots.length === 0
+      ? "no_common_slots"
+      : null;
+
+  return {
+    slots: recommendedSlots,
+    diagnostics: {
+      ...baseDiagnostics,
+      weekdayRangeDays,
+      rawCandidateCount,
+      availableCandidateCount: generatedSlots.length,
+      groupedWindowCount: groupedSlots.length,
+      finalRecommendationCount: recommendedSlots.length,
+      zeroReason,
+    },
+  };
 }
 
 export default function MeetingRequestDetailPage() {
@@ -450,16 +620,9 @@ export default function MeetingRequestDetailPage() {
   const [availabilityError, setAvailabilityError] = useState("");
   const [availabilityLookupSummary, setAvailabilityLookupSummary] =
     useState<AvailabilityLookupSummary | null>(null);
-  const [participantQuery, setParticipantQuery] = useState("");
-  const [participantSearchLoading, setParticipantSearchLoading] = useState(false);
-  const [participantSearchError, setParticipantSearchError] = useState("");
-  const [participantSearchEmpty, setParticipantSearchEmpty] = useState(false);
   const [participantEmailMap, setParticipantEmailMap] = useState<ParticipantEmailMap>(
     {}
   );
-  const [participantCandidates, setParticipantCandidates] = useState<
-    ParticipantSearchResult[]
-  >([]);
   const [editForm, setEditForm] = useState<MeetingRequestEditForm>({
     title: "",
     purpose: "",
@@ -497,7 +660,7 @@ export default function MeetingRequestDetailPage() {
   }, []);
 
   const fetchDetail = useCallback(async () => {
-    if (!requestId) return;
+    if (!requestId) return null;
 
     setLoading(true);
     setErrorMessage("");
@@ -512,7 +675,7 @@ export default function MeetingRequestDetailPage() {
       console.error("미팅 요청 상세 조회 에러:", JSON.stringify(requestError, null, 2));
       setErrorMessage(`미팅 요청을 불러오지 못했어요. (${requestError.message})`);
       setLoading(false);
-      return;
+      return null;
     }
 
     const { data: checklistData, error: checklistError } = await supabase
@@ -525,7 +688,7 @@ export default function MeetingRequestDetailPage() {
       console.error("체크리스트 조회 에러:", checklistError);
       setErrorMessage(`체크리스트를 불러오지 못했어요. (${checklistError.message})`);
       setLoading(false);
-      return;
+      return null;
     }
 
     const { data: selectedSlotData, error: selectedSlotError } = await supabase
@@ -539,11 +702,16 @@ export default function MeetingRequestDetailPage() {
       console.error("확정 슬롯 조회 에러:", selectedSlotError);
       setErrorMessage(`확정 슬롯을 불러오지 못했어요. (${selectedSlotError.message})`);
       setLoading(false);
-      return;
+      return null;
     }
 
     const parsedChecklist = (checklistData as ExecutionChecklist) || null;
     const normalizedRequest = normalizeMeetingRequest(requestData as MeetingRequest);
+    console.log("[FETCH] requestData from DB", {
+  id: requestData?.id,
+  title: requestData?.title,
+  participants_text: requestData?.participants_text,
+});
 
     setRequest(normalizedRequest);
     setChecklist(parsedChecklist);
@@ -555,20 +723,41 @@ export default function MeetingRequestDetailPage() {
     setRoomInfoInput(parsedChecklist?.room_info || "");
     setSpecialNotesInput(parsedChecklist?.special_notes || "");
     setLoading(false);
+
+    return {
+      request: normalizedRequest,
+      checklist: parsedChecklist,
+      selectedSlot: (selectedSlotData as SelectedSlot) || null,
+    };
   }, [buildEditFormFromRequest, requestId]);
 
   useEffect(() => {
     void fetchDetail();
   }, [fetchDetail]);
 
-  const generatedRecommendedSlots = useMemo(() => {
-    return generateRecommendedSlots({
+  const generatedRecommendationResult = useMemo(() => {
+    const result = getGeneratedSlotRecommendationResult({
       preferredRange: request?.preferred_date_range || null,
       durationMinutes: request?.duration_minutes || null,
       availabilityItems,
       limit: 3,
     });
+    console.info("[generated-slot-debug]", {
+      preferred_date_range: result.diagnostics.preferredRangeRaw,
+      parsed_range: result.diagnostics.parsedRangeLabel,
+      duration_minutes: result.diagnostics.durationMinutes,
+      effective_duration_minutes: result.diagnostics.effectiveDurationMinutes,
+      availability_items_length: result.diagnostics.availabilityItemsCount,
+      raw_candidate_slot_count: result.diagnostics.rawCandidateCount,
+      available_for_all_slot_count: result.diagnostics.availableCandidateCount,
+      grouped_window_count: result.diagnostics.groupedWindowCount,
+      final_recommendation_count: result.diagnostics.finalRecommendationCount,
+      zero_reason: result.diagnostics.zeroReason,
+    });
+    return result;
   }, [availabilityItems, request?.duration_minutes, request?.preferred_date_range]);
+
+  const generatedRecommendedSlots = generatedRecommendationResult.slots;
 
   async function createChecklistIfNeeded(meetingRequestId: string | number) {
     const { data: existingChecklist, error: checkError } = await supabase
@@ -687,11 +876,11 @@ export default function MeetingRequestDetailPage() {
       }
     }
 
-    await fetchDetail();
+    const refreshedDetail = await fetchDetail();
 
     if (newStatus === "slot_checking") {
       try {
-        await handleCheckAvailability();
+        await handleCheckAvailability(refreshedDetail?.request ?? request);
       } catch (error) {
         console.error(error);
       }
@@ -773,20 +962,59 @@ export default function MeetingRequestDetailPage() {
       ...nextValues,
     });
 
-    const { error } = await supabase
-      .from("execution_checklists")
-      .update(nextValues)
-      .eq("id", checklist.id);
+    console.log("[checklist-text-save] before update", {
+      checklistId: checklist.id,
+      nextValues,
+    });
 
-    if (error) {
-      console.error("체크리스트 텍스트 저장 에러:", error);
-      setErrorMessage(`체크리스트 저장 실패: ${error.message}`);
+    try {
+      const targetChecklistId =
+        typeof checklist.id === "number" ? checklist.id : String(checklist.id);
+
+      const { data, error } = await supabase
+        .from("execution_checklists")
+        .update(nextValues)
+        .eq("id", targetChecklistId)
+        .select("id, onsite_owner, room_info, special_notes");
+
+      console.log("[checklist-text-save] update result", {
+        data,
+        error,
+      });
+
+      if (error) {
+        console.error("체크리스트 텍스트 저장 에러:", error);
+        setErrorMessage(`체크리스트 저장 실패: ${error.message}`);
+        setUpdating(false);
+        return;
+      }
+
+      if (!data || data.length === 0) {
+        console.error("체크리스트 텍스트 저장 실패: 0 rows updated", {
+          checklistId: checklist.id,
+          targetChecklistId,
+          nextValues,
+        });
+        setErrorMessage(
+          "체크리스트 저장 실패: 실제로 반영된 row가 없어요. RLS 또는 대상 row 문제일 수 있어요."
+        );
+        setUpdating(false);
+        return;
+      }
+
       setUpdating(false);
-      return;
+      toast.success("체크리스트 텍스트를 저장했어요.");
+    } catch (error) {
+      console.error("체크리스트 텍스트 저장 예외:", error);
+      const message =
+        error instanceof TypeError && error.message.includes("Failed to fetch")
+          ? "체크리스트 저장 요청을 보내지 못했어요. 네트워크 또는 권한 설정을 확인해주세요."
+          : error instanceof Error
+          ? `체크리스트 저장 실패: ${error.message}`
+          : "체크리스트 저장 중 알 수 없는 오류가 발생했어요.";
+      setErrorMessage(message);
+      setUpdating(false);
     }
-
-    setUpdating(false);
-    toast.success("체크리스트 텍스트를 저장했어요.");
   }
 
   function getStatusLabel(status: string | null) {
@@ -935,11 +1163,18 @@ export default function MeetingRequestDetailPage() {
   }
 
   function getParticipantEmails() {
-    return getParticipantEmailsList(request?.participants_text);
+    return buildResolvedParticipantContacts(
+      request?.participants_text,
+      availabilityLookupSummary
+    )
+      .map((item) => item.email || "")
+      .filter(Boolean);
   }
 
-  async function resolveParticipantEmailsForAvailability() {
-    const participants = parseParticipants(request?.participants_text);
+  async function resolveParticipantEmailsForAvailability(
+    requestSnapshot: MeetingRequest | null = request
+  ) {
+    const participants = parseParticipants(requestSnapshot?.participants_text);
     const resolvedEmails = new Set<string>();
     const autoMapped: AvailabilityLookupSummary["autoMapped"] = [];
     const failed: string[] = [];
@@ -960,7 +1195,7 @@ export default function MeetingRequestDetailPage() {
       unresolvedNames.map(async (name) => {
         try {
           const response = await fetch(
-            `/api/google-people/search?query=${encodeURIComponent(name)}`
+            `/api/contacts/search?query=${encodeURIComponent(name)}`
           );
           const result = (await response.json()) as {
             error?: string;
@@ -1055,11 +1290,12 @@ ${title}
   }
 
   function buildAttendeeEmailsCopyText() {
-    const participants = parseParticipants(request?.participants_text);
-
-    return participants
-      .filter((p) => p.email)
-      .map((p) => `${p.name} <${p.email}>`)
+    return buildResolvedParticipantContacts(
+      request?.participants_text,
+      availabilityLookupSummary
+    )
+      .filter((participant) => participant.email)
+      .map((participant) => `${participant.name} <${participant.email}>`)
       .join(", ");
   }
 
@@ -1205,8 +1441,20 @@ ${title}
     }
   }
 
-  async function handleCheckAvailability() {
-    const parsedRange = parsePreferredDateRange(request?.preferred_date_range || null);
+  async function handleCheckAvailability(
+    requestSnapshot: MeetingRequest | null = request
+  ) {
+    const parsedRange = parsePreferredDateRange(
+      requestSnapshot?.preferred_date_range || null
+    );
+    console.info("[availability-debug]", {
+      preferred_date_range: requestSnapshot?.preferred_date_range || null,
+      parsed_range: parsedRange
+        ? formatDateRangeDebugLabel(parsedRange.start, parsedRange.end)
+        : null,
+      duration_minutes: requestSnapshot?.duration_minutes ?? null,
+      participants_count: parseParticipants(requestSnapshot?.participants_text).length,
+    });
 
     if (!parsedRange) {
       setAvailabilityError("희망 시기를 먼저 설정해야 availability를 조회할 수 있어요.");
@@ -1238,12 +1486,20 @@ ${title}
     setAvailabilityLookupSummary(null);
 
     try {
-      const lookupSummary = await resolveParticipantEmailsForAvailability();
+      const lookupSummary = await resolveParticipantEmailsForAvailability(
+        requestSnapshot
+      );
       const participantEmails = lookupSummary.resolvedEmails;
+      setAvailabilityLookupSummary(lookupSummary);
+      console.info("[availability-debug]", {
+        resolved_email_count: participantEmails.length,
+        auto_mapped_count: lookupSummary.autoMapped.length,
+        failed_count: lookupSummary.failed.length,
+        ambiguous_count: lookupSummary.ambiguous.length,
+      });
 
       if (participantEmails.length === 0) {
         setAvailabilityItems([]);
-        setAvailabilityLookupSummary(lookupSummary);
         setAvailabilityError(
           "사용 가능한 참석자 이메일을 찾지 못해서 availability를 조회할 수 없어요."
         );
@@ -1263,27 +1519,94 @@ ${title}
         }),
       });
 
-      const result = (await response.json()) as {
+      const responseContentType = response.headers.get("content-type");
+      const responseText = await response.text();
+      console.log("[availability-fetch-response]", {
+        status: response.status,
+        ok: response.ok,
+        contentType: responseContentType,
+        rawText: responseText,
+      });
+
+      let result: {
         error?: string;
         attendees?: AvailabilityItem[];
-      };
+        failures?: Array<{
+          calendarId: string;
+          status: number;
+          message: string;
+        }>;
+        warning?: string | null;
+      } = {};
+
+      const isJsonResponse =
+        responseContentType?.includes("application/json") ||
+        responseText.trim().startsWith("{") ||
+        responseText.trim().startsWith("[");
+
+      if (isJsonResponse && responseText.trim()) {
+        try {
+          result = JSON.parse(responseText) as typeof result;
+        } catch (parseError) {
+          console.error("[availability-fetch-response] json parse failed", parseError);
+        }
+      }
 
       if (!response.ok) {
-        throw new Error(result.error || "availability 조회 실패");
+        const fallbackError = responseText.trim().toLowerCase() === "not found"
+          ? "API route를 찾지 못했어요."
+          : !isJsonResponse && responseText.trim()
+          ? "API route를 찾지 못했어요."
+          : "availability 조회 실패";
+        const userMessage = getAvailabilityUserMessage({
+          warning: result.warning,
+          error: result.error || fallbackError,
+          attendeesCount: result.attendees?.length || 0,
+        });
+        console.log("[availability-ui]", {
+          error: result.error || null,
+          warning: result.warning || null,
+          attendeesCount: result.attendees?.length || 0,
+        });
+        throw new Error(userMessage);
       }
 
       const nextAvailabilityItems = result.attendees || [];
+      console.info("[availability-debug]", {
+        attendee_result_count: nextAvailabilityItems.length,
+        attendees_with_busy_blocks: nextAvailabilityItems.filter(
+          (item) => item.busy.length > 0
+        ).length,
+        failed_calendar_count: result.failures?.length || 0,
+      });
       setAvailabilityItems(nextAvailabilityItems);
-      setAvailabilityLookupSummary(lookupSummary);
+      const userMessage = getAvailabilityUserMessage({
+        warning: result.warning,
+        error: result.error || null,
+        attendeesCount: nextAvailabilityItems.length,
+      });
+      console.log("[availability-ui]", {
+        error: result.error || null,
+        warning: result.warning || null,
+        attendeesCount: nextAvailabilityItems.length,
+      });
+      setAvailabilityError(result.warning ? userMessage : "");
       toast.success("희망 시기 범위 기준 availability를 불러왔어요.");
     } catch (error) {
       console.error(error);
       setAvailabilityItems([]);
-      setAvailabilityError(
-        error instanceof Error
-          ? error.message
-          : "availability 조회 중 오류가 발생했어요."
-      );
+      const errorMessage =
+        error instanceof Error ? error.message : "availability 조회 중 오류가 발생했어요.";
+      const userMessage = getAvailabilityUserMessage({
+        error: errorMessage,
+        attendeesCount: 0,
+      });
+      console.log("[availability-ui]", {
+        error: errorMessage,
+        warning: null,
+        attendeesCount: 0,
+      });
+      setAvailabilityError(userMessage);
     } finally {
       setAvailabilityLoading(false);
     }
@@ -1300,15 +1623,6 @@ ${title}
     setErrorMessage("");
 
     try {
-      const { error: clearError } = await supabase
-        .from("meeting_slot_candidates")
-        .update({ is_selected: false })
-        .eq("meeting_request_id", request.id);
-
-      if (clearError) {
-        throw new Error(`기존 선택 슬롯 해제 실패: ${clearError.message}`);
-      }
-
       const { data: existingSlot, error: existingSlotError } = await supabase
         .from("meeting_slot_candidates")
         .select("id")
@@ -1322,20 +1636,28 @@ ${title}
       }
 
       if (existingSlot?.id) {
-        const { error: updateSlotError } = await supabase
+        const { error: updateSlotMetaError } = await supabase
           .from("meeting_slot_candidates")
           .update({
-            is_selected: true,
             proposed_by: "auto_generated",
             note: "캘린더 기반 자동 생성 가능 시간",
           })
           .eq("id", existingSlot.id);
 
-        if (updateSlotError) {
-          throw new Error(`자동 생성 슬롯 확정 실패: ${updateSlotError.message}`);
+        if (updateSlotMetaError) {
+          throw new Error(`자동 생성 슬롯 메타 저장 실패: ${updateSlotMetaError.message}`);
+        }
+
+        const { error: selectSlotError } = await supabase.rpc("select_meeting_slot", {
+          p_meeting_request_id: request.id,
+          p_slot_id: existingSlot.id,
+        });
+
+        if (selectSlotError) {
+          throw new Error(`자동 생성 슬롯 확정 실패: ${selectSlotError.message}`);
         }
       } else {
-        const { error: insertSlotError } = await supabase
+        const { data: insertedSlotRows, error: insertSlotError } = await supabase
           .from("meeting_slot_candidates")
           .insert({
             meeting_request_id: request.id,
@@ -1343,11 +1665,27 @@ ${title}
             end_datetime: slot.end_datetime,
             proposed_by: "auto_generated",
             note: "캘린더 기반 자동 생성 가능 시간",
-            is_selected: true,
-          });
+            is_selected: false,
+          })
+          .select("id");
 
         if (insertSlotError) {
           throw new Error(`자동 생성 슬롯 저장 실패: ${insertSlotError.message}`);
+        }
+
+        const insertedSlotId = insertedSlotRows?.[0]?.id;
+
+        if (!insertedSlotId) {
+          throw new Error("자동 생성 슬롯 저장 실패: 새 슬롯 id를 찾지 못했어요.");
+        }
+
+        const { error: selectSlotError } = await supabase.rpc("select_meeting_slot", {
+          p_meeting_request_id: request.id,
+          p_slot_id: insertedSlotId,
+        });
+
+        if (selectSlotError) {
+          throw new Error(`자동 생성 슬롯 확정 실패: ${selectSlotError.message}`);
         }
       }
 
@@ -1408,59 +1746,19 @@ ${title}
     field: keyof MeetingRequestEditForm,
     value: string | boolean
   ) {
+    if (field === "participants_text" && typeof value === "string") {
+      setEditForm((prev) => ({
+        ...prev,
+        [field]: value,
+      }));
+      setParticipantEmailMap((prev) => pruneParticipantEmailMap(value, prev));
+      return;
+    }
+
     setEditForm((prev) => ({
       ...prev,
       [field]: value,
     }));
-  }
-
-  async function handleParticipantSearch() {
-    const query = participantQuery.trim();
-
-    if (!query) {
-      setParticipantCandidates([]);
-      setParticipantSearchError("");
-      setParticipantSearchEmpty(false);
-      return;
-    }
-
-    setParticipantSearchLoading(true);
-    setParticipantSearchError("");
-    setParticipantSearchEmpty(false);
-
-    try {
-      const response = await fetch(
-        `/api/google-people/search?query=${encodeURIComponent(query)}`
-      );
-      const result = (await response.json()) as {
-        error?: string;
-        results?: ParticipantSearchResult[];
-      };
-
-      if (!response.ok) {
-        throw new Error(result.error || "참가자 검색에 실패했어요.");
-      }
-
-      const nextCandidates = (result.results || []).filter(
-        (candidate, index, array) =>
-          array.findIndex(
-            (item) => item.email.toLowerCase() === candidate.email.toLowerCase()
-          ) === index
-      );
-      setParticipantCandidates(nextCandidates);
-      setParticipantSearchEmpty(nextCandidates.length === 0);
-    } catch (searchError) {
-      console.error(searchError);
-      setParticipantCandidates([]);
-      setParticipantSearchEmpty(false);
-      setParticipantSearchError(
-        searchError instanceof Error
-          ? searchError.message
-          : "참가자 검색 중 오류가 발생했어요."
-      );
-    } finally {
-      setParticipantSearchLoading(false);
-    }
   }
 
   function handleSelectParticipant(candidate: ParticipantSearchResult) {
@@ -1486,10 +1784,6 @@ ${title}
       ...prev,
       [getParticipantNameKey(candidate.name)]: candidate.email.trim().toLowerCase(),
     }));
-    setParticipantQuery("");
-    setParticipantCandidates([]);
-    setParticipantSearchError("");
-    setParticipantSearchEmpty(false);
     toast.success(`${normalizeParticipantName(candidate.name)} 참석자를 반영했어요.`);
   }
 
@@ -1498,10 +1792,6 @@ ${title}
 
     setEditForm(buildEditFormFromRequest(request));
     setParticipantEmailMap(buildParticipantEmailMap(request.participants_text));
-    setParticipantQuery("");
-    setParticipantCandidates([]);
-    setParticipantSearchError("");
-    setParticipantSearchEmpty(false);
     setIsEditMode(true);
     setErrorMessage("");
   }
@@ -1514,10 +1804,6 @@ ${title}
 
     setEditForm(buildEditFormFromRequest(request));
     setParticipantEmailMap(buildParticipantEmailMap(request.participants_text));
-    setParticipantQuery("");
-    setParticipantCandidates([]);
-    setParticipantSearchError("");
-    setParticipantSearchEmpty(false);
     setIsEditMode(false);
     setErrorMessage("");
   }
@@ -1527,9 +1813,21 @@ ${title}
 
     setUpdating(true);
     setErrorMessage("");
+    const participantsTextarea = document.querySelector("textarea");
+    const latestParticipantsText =
+      participantsTextarea instanceof HTMLTextAreaElement
+        ? participantsTextarea.value
+        : "";
+    const normalizedParticipantsText = parseParticipantNamesText(
+      latestParticipantsText
+    ).join(", ");
+    const nextParticipantEmailMap = pruneParticipantEmailMap(
+      normalizedParticipantsText,
+      participantEmailMap
+    );
     const participantsValue = buildParticipantsStorageValueFromEmailMap({
-      displayText: editForm.participants_text,
-      emailMap: participantEmailMap,
+      displayText: normalizedParticipantsText,
+      emailMap: nextParticipantEmailMap,
     });
 
     const payload = {
@@ -1545,20 +1843,38 @@ ${title}
       urgency: editForm.urgency_level.trim() || null,
       memo: editForm.planning_notes.trim() || null,
     };
+    const targetRequestId =
+      typeof request.id === "number" ? request.id : String(request.id);
 
-    const { error } = await supabase
+    const { data: updatedRows, error } = await supabase
       .from("meeting_requests")
       .update(payload)
-      .eq("id", request.id);
+      .eq("id", targetRequestId)
+      .select("id");
 
     if (error) {
       console.error("미팅 요청 수정 에러:", error);
-      setErrorMessage(`미팅 요청 저장 실패: ${error.message}`);
+      setErrorMessage(`저장 실패: ${error.message}`);
       setUpdating(false);
       return;
     }
 
+    if (!updatedRows || updatedRows.length === 0) {
+      console.error("미팅 요청 수정 실패: 0 rows updated", {
+        requestId: request.id,
+        targetRequestId,
+        payload,
+      });
+      setErrorMessage(
+        "저장 실패: 권한(RLS) 또는 대상 row 문제로 실제 반영된 row가 없어요."
+      );
+      setUpdating(false);
+      return;
+    }
+
+    setParticipantEmailMap(nextParticipantEmailMap);
     setAvailabilityItems([]);
+    setAvailabilityLookupSummary(null);
     setAvailabilityError("");
     setIsEditMode(false);
     await fetchDetail();
@@ -1815,81 +2131,11 @@ ${title}
                 </p>
 
                 <div className="mt-3 rounded-xl bg-gray-50 p-3">
-                  <label className="mb-1 block text-xs font-medium text-gray-600">
-                    참가자 검색
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={participantQuery}
-                      onChange={(e) => setParticipantQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          void handleParticipantSearch();
-                        }
-                      }}
-                      placeholder="이름으로 검색"
-                      className="flex-1 rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleParticipantSearch}
-                      disabled={participantSearchLoading}
-                      className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-gray-400"
-                    >
-                      {participantSearchLoading ? "검색 중..." : "검색"}
-                    </button>
-                  </div>
-
-                  {participantSearchError && (
-                    <p className="mt-2 text-xs text-red-600">
-                      {participantSearchError}
-                    </p>
-                  )}
-
-                  {participantSearchEmpty && !participantSearchError && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      검색 결과가 없습니다.
-                    </p>
-                  )}
-
-                  {participantCandidates.length > 0 && (
-                    <div className="mt-3 space-y-2">
-                      {participantCandidates.map((candidate) => {
-                        const alreadySelected = parseParticipantNamesText(
-                          editForm.participants_text
-                        ).some(
-                          (name) =>
-                            getParticipantNameKey(name) ===
-                            getParticipantNameKey(candidate.name)
-                        );
-
-                        return (
-                          <button
-                            key={candidate.email}
-                            type="button"
-                            onClick={() => handleSelectParticipant(candidate)}
-                            disabled={alreadySelected}
-                            className="block w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-left hover:bg-gray-100 disabled:cursor-not-allowed disabled:bg-gray-100"
-                          >
-                            <p className="text-sm font-medium text-gray-900">
-                              {candidate.name}
-                            </p>
-                            <p className="text-xs text-gray-600">{candidate.email}</p>
-                            {candidate.organization && (
-                              <p className="text-xs text-gray-500">
-                                {candidate.organization}
-                              </p>
-                            )}
-                            {alreadySelected && (
-                              <p className="mt-1 text-xs text-blue-600">이미 선택됨</p>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <ContactSearchInput
+                    onSelect={handleSelectParticipant}
+                    placeholder="이름 또는 이메일로 검색"
+                    label="참가자 검색"
+                  />
                 </div>
               </div>
 
@@ -2043,7 +2289,11 @@ ${title}
           )}
         </div>
 
-        {availabilityItems.length > 0 && (
+        {(request.status === "slot_checking" ||
+          availabilityLoading ||
+          availabilityItems.length > 0 ||
+          Boolean(availabilityError) ||
+          Boolean(availabilityLookupSummary)) && (
           <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
             <div className="mb-4">
               <h3 className="text-lg font-semibold text-gray-900">
@@ -2072,7 +2322,10 @@ ${title}
                           추천 {index + 1}
                         </p>
                         <p className="mt-1 text-sm text-indigo-900">
-                          {formatDate(slot.window_start)} 중 {formatDuration(request.duration_minutes)}
+                          {formatDate(slot.window_start)} 중{" "}
+                          {formatDuration(
+                            getEffectiveDurationMinutes(request.duration_minutes)
+                          )}
                         </p>
                         <p className="mt-1 text-sm text-indigo-700">
                           가능 구간: {formatTimeRangeLabel(slot.window_start, slot.window_end)}
@@ -2113,7 +2366,17 @@ ${title}
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-4 text-sm text-gray-600">
-                희망 시기 범위 안에서 전원 공통 가능 시간을 찾지 못했어요.
+                <p>희망 시기 범위 안에서 전원 공통 가능 시간을 찾지 못했어요.</p>
+                <p className="mt-2 text-xs text-gray-500">
+                  진단: range=
+                  {generatedRecommendationResult.diagnostics.parsedRangeLabel || "없음"},
+                  duration=
+                  {generatedRecommendationResult.diagnostics.effectiveDurationMinutes}분,
+                  availability={generatedRecommendationResult.diagnostics.availabilityItemsCount},
+                  raw={generatedRecommendationResult.diagnostics.rawCandidateCount},
+                  pass={generatedRecommendationResult.diagnostics.availableCandidateCount},
+                  final={generatedRecommendationResult.diagnostics.finalRecommendationCount}
+                </p>
               </div>
             )}
           </div>

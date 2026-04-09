@@ -306,22 +306,10 @@ const rankedSlots = useMemo(() => {
   async function handleSelectSlot(slotId: string) {
     setSubmitting(true);
 
-    const { error: clearError } = await supabase
-      .from("meeting_slot_candidates")
-      .update({ is_selected: false })
-      .eq("meeting_request_id", meetingRequestId);
-
-    if (clearError) {
-      console.error("기존 선택 해제 오류:", clearError);
-      toast.error("기존 선택을 해제하지 못했어요.");
-      setSubmitting(false);
-      return;
-    }
-
-    const { error: selectError } = await supabase
-      .from("meeting_slot_candidates")
-      .update({ is_selected: true })
-      .eq("id", slotId);
+    const { error: selectError } = await supabase.rpc("select_meeting_slot", {
+      p_meeting_request_id: meetingRequestId,
+      p_slot_id: slotId,
+    });
 
     if (selectError) {
       console.error("슬롯 선택 오류:", selectError);

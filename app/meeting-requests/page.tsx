@@ -332,6 +332,19 @@ function MeetingRequestsContent() {
         supabase,
         meetingRequestId,
       });
+      setRequests((prev) =>
+        prev.filter((request) => String(request.id) !== String(meetingRequestId))
+      );
+      setChecklistProgressMap((prev) => {
+        const next = { ...prev };
+        delete next[String(meetingRequestId)];
+        return next;
+      });
+      setSelectedSlotMap((prev) => {
+        const next = { ...prev };
+        delete next[String(meetingRequestId)];
+        return next;
+      });
       await fetchMeetingRequests();
     } catch (error) {
       console.error("미팅 요청 삭제 에러:", error);

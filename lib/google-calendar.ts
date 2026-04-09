@@ -130,7 +130,7 @@ export async function fetchGoogleCalendarTimedBusyEvents({
 }: GoogleFreeBusyRequest) {
   const accessToken = await getGoogleAccessToken();
 
-  const attendees = await Promise.all(
+  const attendeeResults = await Promise.all(
     calendarIds.map(async (calendarId) => {
       const url = new URL(
         `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
@@ -156,9 +156,20 @@ export async function fetchGoogleCalendarTimedBusyEvents({
       };
 
       if (!response.ok) {
-        throw new Error(
-          result.error?.message || "Google Calendar events 조회에 실패했습니다."
-        );
+        const message =
+          result.error?.message || "Google Calendar events 조회에 실패했습니다.";
+        console.error("[google-calendar-events] attendee fetch failed", {
+          calendarId,
+          status: response.status,
+          message,
+        });
+
+        return {
+          ok: false as const,
+          calendarId,
+          status: response.status,
+          message,
+        };
       }
 
       const busy = (result.items || [])
@@ -172,12 +183,30 @@ export async function fetchGoogleCalendarTimedBusyEvents({
         .filter((busyItem) => busyItem.start && busyItem.end);
 
       return {
-        email: calendarId,
-        busy,
-        isFree: busy.length === 0,
+        ok: true as const,
+        attendee: {
+          email: calendarId,
+          busy,
+          isFree: busy.length === 0,
+        },
       };
     })
   );
 
-  return attendees;
+  const attendees = attendeeResults
+    .filter((item): item is Extract<(typeof attendeeResults)[number], { ok: true }> => item.ok)
+    .map((item) => item.attendee);
+
+  const failures = attendeeResults
+    .filter((item): item is Extract<(typeof attendeeResults)[number], { ok: false }> => !item.ok)
+    .map((item) => ({
+      calendarId: item.calendarId,
+      status: item.status,
+      message: item.message,
+    }));
+
+  return {
+    attendees,
+    failures,
+  };
 }

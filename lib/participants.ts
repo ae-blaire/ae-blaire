@@ -87,6 +87,26 @@ export function parseParticipantNamesText(value: string) {
   return names;
 }
 
+export function pruneParticipantEmailMap(
+  displayText: string,
+  emailMap: Record<string, string>
+) {
+  const visibleNameKeys = new Set(
+    parseParticipantNamesText(displayText).map((name) => getParticipantNameKey(name))
+  );
+
+  return Object.entries(emailMap).reduce<Record<string, string>>((acc, [key, email]) => {
+    const normalizedEmail = email?.trim().toLowerCase();
+
+    if (!visibleNameKeys.has(key) || !normalizedEmail) {
+      return acc;
+    }
+
+    acc[key] = normalizedEmail;
+    return acc;
+  }, {});
+}
+
 export function parseParticipants(value: unknown): ParticipantEntry[] {
   if (!value) return [];
 
@@ -200,6 +220,7 @@ export function buildParticipantsStorageValueFromEmailMap({
   emailMap: Record<string, string>;
 }) {
   const participantNames = parseParticipantNamesText(displayText);
+  const nextEmailMap = pruneParticipantEmailMap(displayText, emailMap);
 
   if (participantNames.length === 0) {
     return null;
@@ -207,7 +228,7 @@ export function buildParticipantsStorageValueFromEmailMap({
 
   return JSON.stringify(
     participantNames.map((name) => {
-      const email = emailMap[getParticipantNameKey(name)]?.trim().toLowerCase();
+      const email = nextEmailMap[getParticipantNameKey(name)]?.trim().toLowerCase();
       return email ? { name, email } : { name };
     })
   );

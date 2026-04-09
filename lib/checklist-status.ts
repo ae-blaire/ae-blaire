@@ -37,6 +37,18 @@ export async function syncMeetingRequestStatusByChecklist({
   currentStatus: string | null | undefined;
   checklist: ChecklistLike;
 }) {
+  if (!currentStatus) {
+    return currentStatus ?? null;
+  }
+
+  if (["received", "reviewing", "slot_checking", "rejected"].includes(currentStatus)) {
+    return currentStatus;
+  }
+
+  if (currentStatus === "done") {
+    return currentStatus;
+  }
+
   const completed = isChecklistCompleted(checklist);
   const hasAnyChecked = hasAnyChecklistProgress(checklist);
   const nextStatus = completed

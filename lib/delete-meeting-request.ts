@@ -25,12 +25,19 @@ export async function deleteMeetingRequestWithRelations({
     throw new Error(`슬롯 후보 삭제 실패: ${slotError.message}`);
   }
 
-  const { error: requestError } = await supabase
+  const { data: deletedRows, error: requestError } = await supabase
     .from("meeting_requests")
     .delete()
-    .eq("id", meetingRequestId);
+    .eq("id", meetingRequestId)
+    .select("id");
 
   if (requestError) {
     throw new Error(`미팅 요청 삭제 실패: ${requestError.message}`);
+  }
+
+  if (!deletedRows || deletedRows.length === 0) {
+    throw new Error(
+      "미팅 요청 삭제 실패: 실제로 삭제된 row가 없어요. 권한(RLS) 또는 대상 row를 확인해주세요."
+    );
   }
 }

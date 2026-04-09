@@ -15,6 +15,7 @@ function isValidIsoDateTime(value: string | undefined) {
 
 export async function POST(req: NextRequest) {
   try {
+    console.info("[google-calendar-freebusy-route] request received");
     const body = (await req.json()) as FreeBusyRequestBody;
 
     const timeMin =
@@ -48,12 +49,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const attendees = await fetchGoogleCalendarTimedBusyEvents({
+    const { attendees, failures } = await fetchGoogleCalendarTimedBusyEvents({
       timeMin,
       timeMax,
       timeZone,
       calendarIds: attendeeEmails,
     });
+
+    if (failures.length > 0) {
+      console.error("[google-calendar-freebusy] partial attendee failures", failures);
+    }
+
+    const warning =
+      failures.length > 0
+        ? failures.length === attendeeEmails.length
+          ? "참석자 캘린더를 조회하지 못했어요. 권한 또는 캘린더 ID를 확인해주세요."
+          : "일부 참석자의 캘린더를 조회할 수 없었어요. 권한 또는 캘린더 ID를 확인해주세요."
+        : null;
 
     return NextResponse.json({
       ok: true,
@@ -61,17 +73,24 @@ export async function POST(req: NextRequest) {
       timeMax,
       timeZone,
       attendees,
+      failures,
+      warning,
       note: "All-day events and transparent events are excluded from recommendation busy calculations.",
     });
   } catch (error) {
     console.error("google-calendar freebusy route error:", error);
 
+    const rawMessage =
+      error instanceof Error
+        ? error.message
+        : "Failed to fetch Google Calendar availability";
+    const userMessage = rawMessage.toLowerCase().includes("not found")
+      ? "참석자 캘린더를 조회하지 못했어요. 권한 또는 캘린더 ID를 확인해주세요."
+      : rawMessage;
+
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to fetch Google Calendar availability",
+        error: userMessage,
       },
       { status: 500 }
     );

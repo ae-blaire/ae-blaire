@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import ContactSearchInput from "@/components/ContactSearchInput";
 import {
   buildParticipantsStorageValueFromEmailMap,
   getParticipantNameKey,
   parseParticipantNamesText,
+  pruneParticipantEmailMap,
 } from "@/lib/participants";
 
 type FormData = {
@@ -22,7 +24,7 @@ type FormData = {
   memo: string;
 };
 
-type PeopleSearchResponse = {
+type ContactsSearchResponse = {
   error?: string;
   results?: Array<{
     name: string;
@@ -80,37 +82,43 @@ export default function NewRequestPage() {
       return;
     }
 
+    if (name === "attendees") {
+      setForm((prev) => ({ ...prev, [name]: value }));
+      setParticipantEmailMap((prev) => pruneParticipantEmailMap(value, prev));
+      return;
+    }
+
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  async function handleAutoResolveParticipants() {
-    const names = parseParticipantNamesText(form.attendees);
+  async function handleAutoResolveParticipants(displayText: string) {
+    const names = parseParticipantNamesText(displayText);
+    const nextEmailMap = pruneParticipantEmailMap(displayText, participantEmailMap);
 
     for (const name of names) {
       const key = getParticipantNameKey(name);
 
-      if (participantEmailMap[key]) continue;
+      if (nextEmailMap[key]) continue;
 
       try {
         const response = await fetch(
-          `/api/google-people/search?query=${encodeURIComponent(name)}`
+          `/api/contacts/search?query=${encodeURIComponent(name)}`
         );
-        const result = (await response.json()) as PeopleSearchResponse;
+        const result = (await response.json()) as ContactsSearchResponse;
 
         if (!response.ok || !result.results) continue;
 
         if (result.results.length === 1) {
           const candidate = result.results[0];
-
-          setParticipantEmailMap((prev) => ({
-            ...prev,
-            [key]: candidate.email.trim().toLowerCase(),
-          }));
+          nextEmailMap[key] = candidate.email.trim().toLowerCase();
         }
       } catch (e) {
         console.error("auto resolve error", e);
       }
     }
+
+    setParticipantEmailMap(nextEmailMap);
+    return nextEmailMap;
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -124,7 +132,10 @@ export default function NewRequestPage() {
       return;
     }
 
-    await handleAutoResolveParticipants();
+    const normalizedAttendees = parseParticipantNamesText(form.attendees).join(", ");
+    const resolvedParticipantEmailMap = await handleAutoResolveParticipants(
+      normalizedAttendees
+    );
 
     const preferredDateRange =
       form.startDate && form.endDate
@@ -140,8 +151,8 @@ export default function NewRequestPage() {
     const urgencyLevel = normalizeUrgencyLevel(form.urgency);
 
     const participantsValue = buildParticipantsStorageValueFromEmailMap({
-      displayText: form.attendees,
-      emailMap: participantEmailMap,
+      displayText: normalizedAttendees,
+      emailMap: resolvedParticipantEmailMap,
     });
 
     const payload = {
@@ -184,6 +195,33 @@ export default function NewRequestPage() {
     setError("");
     setParticipantEmailMap({});
   };
+
+  function handleSelectParticipant(contact: { name: string; email: string }) {
+    const normalizedName = parseParticipantNamesText(contact.name)[0];
+    if (!normalizedName) return;
+
+    setForm((prev) => {
+      const currentNames = parseParticipantNamesText(prev.attendees);
+      const candidateKey = getParticipantNameKey(normalizedName);
+
+      if (currentNames.some((name) => getParticipantNameKey(name) === candidateKey)) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        attendees:
+          currentNames.length > 0
+            ? `${currentNames.join(", ")}, ${normalizedName}`
+            : normalizedName,
+      };
+    });
+
+    setParticipantEmailMap((prev) => ({
+      ...prev,
+      [getParticipantNameKey(normalizedName)]: contact.email.trim().toLowerCase(),
+    }));
+  }
 
   return (
     <div>
@@ -234,13 +272,16 @@ export default function NewRequestPage() {
             <label className="mb-1 block text-sm font-medium text-gray-700">
               참석자
             </label>
+            <div className="mb-3">
+              <ContactSearchInput onSelect={handleSelectParticipant} />
+            </div>
             <input
               type="text"
               name="attendees"
               value={form.attendees}
               onChange={handleChange}
               onBlur={() => {
-                void handleAutoResolveParticipants();
+                void handleAutoResolveParticipants(form.attendees);
               }}
               placeholder="예: 김민준, 이서연"
               className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
