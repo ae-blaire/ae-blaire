@@ -32,7 +32,7 @@ type WeeklySlotCalendarProps = {
   slots: WeeklyCalendarSlot[];
   availabilityItems: WeeklyBusyItem[];
   selectedSlotId: string | null;
-  onSelectSlot: (slotId: string) => void;
+  onSelectSlot: (slotIds: string[]) => void;
 };
 
 const CALENDAR_START_HOUR = 7;
@@ -344,7 +344,7 @@ export default function WeeklySlotCalendar({
                       <button
                         key={slot.id}
                         type="button"
-                        onClick={() => onSelectSlot(slot.id)}
+                        onClick={() => onSelectSlot(slot.slotIds)}
                         className={[
                           "absolute left-1 right-1 overflow-hidden rounded-xl border px-2 py-1 text-left shadow-sm transition",
                           isSelected

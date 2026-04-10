@@ -808,6 +808,9 @@ export default function MeetingRequestDetailPage() {
   const [draftSelectedGeneratedSlotId, setDraftSelectedGeneratedSlotId] = useState<
     string | null
   >(null);
+  const [selectedMergedBlockSlotIds, setSelectedMergedBlockSlotIds] = useState<
+    string[]
+  >([]);
   const [showParticipantSearch, setShowParticipantSearch] = useState(false);
   const [participantEmailMap, setParticipantEmailMap] = useState<ParticipantEmailMap>(
     {}
@@ -961,6 +964,16 @@ export default function MeetingRequestDetailPage() {
   );
   const draftSelectedGeneratedSlot =
     generatedAllAvailableSlots.find((slot) => slot.id === draftSelectedGeneratedSlotId) || null;
+  const selectableSlotsInMergedBlock = useMemo(
+    () =>
+      generatedAllAvailableSlots
+        .filter((slot) => selectedMergedBlockSlotIds.includes(slot.id))
+        .sort(
+          (a, b) =>
+            new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime()
+        ),
+    [generatedAllAvailableSlots, selectedMergedBlockSlotIds]
+  );
 
   useEffect(() => {
     if (
@@ -971,6 +984,12 @@ export default function MeetingRequestDetailPage() {
     ) {
       setDraftSelectedGeneratedSlotId(null);
     }
+
+    setSelectedMergedBlockSlotIds((prev) =>
+      prev.filter((slotId) =>
+        generatedAllAvailableSlots.some((slot) => slot.id === slotId)
+      )
+    );
   }, [draftSelectedGeneratedSlotId, generatedAllAvailableSlots]);
 
   async function createChecklistIfNeeded(meetingRequestId: string | number) {
@@ -1956,6 +1975,7 @@ ${title}
 
       await createChecklistIfNeeded(request.id);
       setDraftSelectedGeneratedSlotId(null);
+      setSelectedMergedBlockSlotIds([]);
       await fetchDetail();
       toast.success("추천 시간을 확정했어요.");
     } catch (error) {
@@ -2623,11 +2643,42 @@ ${title}
                     }))}
                     availabilityItems={availabilityItems}
                     selectedSlotId={draftSelectedGeneratedSlotId}
-                    onSelectSlot={(slotId) => {
-                      setDraftSelectedGeneratedSlotId(slotId);
+                    onSelectSlot={(slotIds) => {
+                      setSelectedMergedBlockSlotIds(slotIds);
+                      if (!slotIds.includes(draftSelectedGeneratedSlotId || "")) {
+                        setDraftSelectedGeneratedSlotId(null);
+                      }
                     }}
                   />
                 </div>
+
+                {selectableSlotsInMergedBlock.length > 0 && (
+                  <div className="rounded-xl border border-gray-200 bg-white px-4 py-4">
+                    <p className="text-xs font-medium text-gray-500">
+                      세부 선택 가능한 슬롯
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {selectableSlotsInMergedBlock.map((slot) => {
+                        const isActive = draftSelectedGeneratedSlotId === slot.id;
+
+                        return (
+                          <button
+                            key={slot.id}
+                            type="button"
+                            onClick={() => setDraftSelectedGeneratedSlotId(slot.id)}
+                            className={
+                              isActive
+                                ? "rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white"
+                                : "rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-200"
+                            }
+                          >
+                            {formatTimeRangeLabel(slot.start_datetime, slot.end_datetime)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
@@ -2652,8 +2703,8 @@ ${title}
                     slots={[]}
                     availabilityItems={availabilityItems}
                     selectedSlotId={draftSelectedGeneratedSlotId}
-                    onSelectSlot={(slotId) => {
-                      setDraftSelectedGeneratedSlotId(slotId);
+                    onSelectSlot={(slotIds) => {
+                      setSelectedMergedBlockSlotIds(slotIds);
                     }}
                   />
                 </div>
