@@ -2730,216 +2730,214 @@ ${title}
           </div>
         </details>
 
+        <details className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
+          <summary className="cursor-pointer text-sm font-medium text-gray-900">
+            {selectedSlot
+              ? "캘린더 이벤트 미리보기 열기"
+              : "캘린더 이벤트 미리보기 열기 (확정 슬롯 없음)"}
+          </summary>
+
+          <div className="mt-4">
+            {selectedSlot ? (
+              <div className="space-y-4">
+                <div className="rounded-xl bg-gray-50 p-4">
+                  <p className="text-xs font-medium text-gray-500">이벤트 제목</p>
+                  <p className="mt-2 text-sm font-semibold text-gray-900">
+                    {buildCalendarTitle()}
+                  </p>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-xl bg-gray-50 p-4">
+                    <p className="text-xs font-medium text-gray-500">시작</p>
+                    <p className="mt-2 text-sm text-gray-900">
+                      {formatDateTimeForCalendar(selectedSlot.start_datetime)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-gray-50 p-4">
+                    <p className="text-xs font-medium text-gray-500">종료</p>
+                    <p className="mt-2 text-sm text-gray-900">
+                      {formatDateTimeForCalendar(selectedSlot.end_datetime)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-gray-50 p-4">
+                  <p className="text-xs font-medium text-gray-500">복사용 안내 문구</p>
+                  <pre className="mt-2 whitespace-pre-wrap text-sm text-gray-900">
+                    {buildCalendarCopyMessage()}
+                  </pre>
+                </div>
+
+                <div className="rounded-xl bg-gray-50 p-4">
+                  <p className="text-xs font-medium text-gray-500">참석자 이메일 복사용</p>
+                  <pre className="mt-2 whitespace-pre-wrap text-sm text-gray-900">
+                    {buildAttendeeEmailsCopyText() || "-"}
+                  </pre>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyCalendarMessage}
+                    className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black"
+                  >
+                    안내 문구 복사
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCopyAttendeeEmails}
+                    className="rounded-xl bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
+                  >
+                    참석자 이메일 복사
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleOpenGoogleCalendar}
+                    className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    Google Calendar에서 열기
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCreateCalendarEventViaApi}
+                    className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                  >
+                    API route 테스트
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-600">
+                아직 확정된 슬롯이 없어서 캘린더 이벤트를 만들 수 없어요.
+              </div>
+            )}
+
+          </div>
+        </details>
+
         <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">
-                캘린더 이벤트 미리보기
-              </h3>
-              <p className="mt-1 text-sm text-gray-600">
-                확정된 슬롯 기준으로 캘린더에 넣을 정보를 미리 만들어요.
+          <div>
+            <p className="text-xs font-medium text-gray-500">
+              참석자 Availability
+            </p>
+            <p className="mt-1 text-sm text-gray-700">
+              슬롯 확인 상태로 들어가면 참석자 캘린더를 자동 조회해요.
+              조회 결과는 위의 자동 생성 가능 시간과 아래 수동 후보 시간에 함께 반영돼요.
+            </p>
+            {availabilityLoading && (
+              <p className="mt-2 text-xs font-medium text-indigo-700">
+                참석자 캘린더를 자동 조회하는 중이에요.
               </p>
-            </div>
+            )}
           </div>
 
-          {selectedSlot ? (
-            <div className="space-y-4">
-              <div className="rounded-xl bg-gray-50 p-4">
-                <p className="text-xs font-medium text-gray-500">이벤트 제목</p>
-                <p className="mt-2 text-sm font-semibold text-gray-900">
-                  {buildCalendarTitle()}
-                </p>
-              </div>
+          <p className="mt-3 text-xs text-gray-500">
+            조회 대상 이메일:{" "}
+            {availabilityLookupSummary?.resolvedEmails?.length
+              ? availabilityLookupSummary.resolvedEmails.join("; ")
+              : getParticipantEmails().length > 0
+              ? getParticipantEmails().join("; ")
+              : "없음"}
+          </p>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-xl bg-gray-50 p-4">
-                  <p className="text-xs font-medium text-gray-500">시작</p>
-                  <p className="mt-2 text-sm text-gray-900">
-                    {formatDateTimeForCalendar(selectedSlot.start_datetime)}
-                  </p>
-                </div>
-
-                <div className="rounded-xl bg-gray-50 p-4">
-                  <p className="text-xs font-medium text-gray-500">종료</p>
-                  <p className="mt-2 text-sm text-gray-900">
-                    {formatDateTimeForCalendar(selectedSlot.end_datetime)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-xl bg-gray-50 p-4">
-                <p className="text-xs font-medium text-gray-500">복사용 안내 문구</p>
-                <pre className="mt-2 whitespace-pre-wrap text-sm text-gray-900">
-                  {buildCalendarCopyMessage()}
-                </pre>
-              </div>
-
-              <div className="rounded-xl bg-gray-50 p-4">
-                <p className="text-xs font-medium text-gray-500">참석자 이메일 복사용</p>
-                <pre className="mt-2 whitespace-pre-wrap text-sm text-gray-900">
-                  {buildAttendeeEmailsCopyText() || "-"}
-                </pre>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopyCalendarMessage}
-                  className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black"
-                >
-                  안내 문구 복사
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleCopyAttendeeEmails}
-                  className="rounded-xl bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
-                >
-                  참석자 이메일 복사
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleOpenGoogleCalendar}
-                  className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                >
-                  Google Calendar에서 열기
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleCreateCalendarEventViaApi}
-                  className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-                >
-                  API route 테스트
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="text-sm text-gray-600">
-              아직 확정된 슬롯이 없어서 캘린더 이벤트를 만들 수 없어요.
+          {availabilityError && (
+            <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {availabilityError}
             </div>
           )}
 
-          <div className="mt-4 rounded-xl bg-gray-50 p-4">
-            <div>
-              <p className="text-xs font-medium text-gray-500">
-                참석자 Availability
-              </p>
-              <p className="mt-1 text-sm text-gray-700">
-                슬롯 확인 상태로 들어가면 참석자 캘린더를 자동 조회해요.
-                조회 결과는 위의 자동 생성 가능 시간과 아래 수동 후보 시간에 함께 반영돼요.
-              </p>
-              {availabilityLoading && (
-                <p className="mt-2 text-xs font-medium text-indigo-700">
-                  참석자 캘린더를 자동 조회하는 중이에요.
+          {availabilityLookupSummary && (
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                <p className="text-xs font-medium text-emerald-800">
+                  자동 매핑 성공
                 </p>
-              )}
-            </div>
-
-            <p className="mt-3 text-xs text-gray-500">
-              조회 대상 이메일:{" "}
-              {availabilityLookupSummary?.resolvedEmails?.length
-                ? availabilityLookupSummary.resolvedEmails.join("; ")
-                : getParticipantEmails().length > 0
-                ? getParticipantEmails().join("; ")
-                : "없음"}
-            </p>
-
-            {availabilityError && (
-              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {availabilityError}
+                {availabilityLookupSummary.autoMapped.length > 0 ? (
+                  <div className="mt-2 space-y-1 text-xs text-emerald-900">
+                    {availabilityLookupSummary.autoMapped.map((item) => (
+                      <p key={`${item.name}-${item.email}`}>
+                        {item.name}
+                        {" -> "}
+                        {item.email}
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-emerald-900">없음</p>
+                )}
               </div>
-            )}
 
-            {availabilityLookupSummary && (
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                  <p className="text-xs font-medium text-emerald-800">
-                    자동 매핑 성공
-                  </p>
-                  {availabilityLookupSummary.autoMapped.length > 0 ? (
-                    <div className="mt-2 space-y-1 text-xs text-emerald-900">
-                      {availabilityLookupSummary.autoMapped.map((item) => (
-                        <p key={`${item.name}-${item.email}`}>
-                          {item.name}
-                          {" -> "}
-                          {item.email}
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <p className="text-xs font-medium text-amber-800">
+                  매핑 실패
+                </p>
+                {availabilityLookupSummary.failed.length > 0 ? (
+                  <div className="mt-2 space-y-1 text-xs text-amber-900">
+                    {availabilityLookupSummary.failed.map((name) => (
+                      <p key={name}>{name}</p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-amber-900">없음</p>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                <p className="text-xs font-medium text-gray-700">
+                  애매해서 제외
+                </p>
+                {availabilityLookupSummary.ambiguous.length > 0 ? (
+                  <div className="mt-2 space-y-1 text-xs text-gray-800">
+                    {availabilityLookupSummary.ambiguous.map((name) => (
+                      <p key={name}>{name}</p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-gray-800">없음</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {availabilityItems.length > 0 && (
+            <div className="mt-4 space-y-3">
+              {availabilityItems.map((item) => (
+                <div
+                  key={item.email}
+                  className="rounded-xl border border-gray-200 bg-white px-4 py-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-medium text-gray-900">{item.email}</p>
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-medium ${
+                        item.isFree
+                          ? "bg-green-100 text-green-700"
+                          : "bg-yellow-100 text-yellow-800"
+                      }`}
+                    >
+                      {item.isFree ? "조회 구간 내 충돌 없음" : "일부 시간 busy"}
+                    </span>
+                  </div>
+
+                  {!item.isFree && (
+                    <div className="mt-2 space-y-1 text-xs text-gray-600">
+                      {item.busy.map((busySlot, index) => (
+                        <p key={`${item.email}-${index}`}>
+                          {formatDateTimeForCalendar(busySlot.start)} ~{" "}
+                          {formatDateTimeForCalendar(busySlot.end)}
                         </p>
                       ))}
                     </div>
-                  ) : (
-                    <p className="mt-2 text-xs text-emerald-900">없음</p>
                   )}
                 </div>
-
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                  <p className="text-xs font-medium text-amber-800">
-                    매핑 실패
-                  </p>
-                  {availabilityLookupSummary.failed.length > 0 ? (
-                    <div className="mt-2 space-y-1 text-xs text-amber-900">
-                      {availabilityLookupSummary.failed.map((name) => (
-                        <p key={name}>{name}</p>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-xs text-amber-900">없음</p>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
-                  <p className="text-xs font-medium text-gray-700">
-                    애매해서 제외
-                  </p>
-                  {availabilityLookupSummary.ambiguous.length > 0 ? (
-                    <div className="mt-2 space-y-1 text-xs text-gray-800">
-                      {availabilityLookupSummary.ambiguous.map((name) => (
-                        <p key={name}>{name}</p>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-xs text-gray-800">없음</p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {availabilityItems.length > 0 && (
-              <div className="mt-4 space-y-3">
-                {availabilityItems.map((item) => (
-                  <div
-                    key={item.email}
-                    className="rounded-xl border border-gray-200 bg-white px-4 py-3"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium text-gray-900">{item.email}</p>
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-medium ${
-                          item.isFree
-                            ? "bg-green-100 text-green-700"
-                            : "bg-yellow-100 text-yellow-800"
-                        }`}
-                      >
-                        {item.isFree ? "조회 구간 내 충돌 없음" : "일부 시간 busy"}
-                      </span>
-                    </div>
-
-                    {!item.isFree && (
-                      <div className="mt-2 space-y-1 text-xs text-gray-600">
-                        {item.busy.map((busySlot, index) => (
-                          <p key={`${item.email}-${index}`}>
-                            {formatDateTimeForCalendar(busySlot.start)} ~{" "}
-                            {formatDateTimeForCalendar(busySlot.end)}
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
