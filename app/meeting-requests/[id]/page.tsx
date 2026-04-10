@@ -2730,7 +2730,7 @@ ${title}
           </div>
         </details>
 
-        <details className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
+        <details className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
           <summary className="cursor-pointer text-sm font-medium text-gray-900">
             {selectedSlot
               ? "캘린더 이벤트 미리보기 열기"
@@ -2817,128 +2817,127 @@ ${title}
               </div>
             )}
 
+            <div className="rounded-xl bg-gray-50 p-4 space-y-4">
+              <div>
+                <p className="text-xs font-medium text-gray-500">
+                  참석자 Availability
+                </p>
+                <p className="mt-1 text-sm text-gray-700">
+                  슬롯 확인 상태로 들어가면 참석자 캘린더를 자동 조회해요.
+                  조회 결과는 위의 자동 생성 가능 시간과 아래 수동 후보 시간에 함께 반영돼요.
+                </p>
+                {availabilityLoading && (
+                  <p className="mt-2 text-xs font-medium text-indigo-700">
+                    참석자 캘린더를 자동 조회하는 중이에요.
+                  </p>
+                )}
+              </div>
+
+              <p className="text-xs text-gray-500">
+                조회 대상 이메일:{" "}
+                {availabilityLookupSummary?.resolvedEmails?.length
+                  ? availabilityLookupSummary.resolvedEmails.join("; ")
+                  : getParticipantEmails().length > 0
+                  ? getParticipantEmails().join("; ")
+                  : "없음"}
+              </p>
+
+              {availabilityError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {availabilityError}
+                </div>
+              )}
+
+              {availabilityLookupSummary && (
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                    <p className="text-xs font-medium text-emerald-800">
+                      자동 매핑 성공
+                    </p>
+                    {availabilityLookupSummary.autoMapped.length > 0 ? (
+                      <div className="mt-2 space-y-1 text-xs text-emerald-900">
+                        {availabilityLookupSummary.autoMapped.map((item) => (
+                          <p key={`${item.name}-${item.email}`}>
+                            {item.name}
+                            {" -> "}
+                            {item.email}
+                          </p>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-emerald-900">없음</p>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                    <p className="text-xs font-medium text-amber-800">
+                      매핑 실패
+                    </p>
+                    {availabilityLookupSummary.failed.length > 0 ? (
+                      <div className="mt-2 space-y-1 text-xs text-amber-900">
+                        {availabilityLookupSummary.failed.map((name) => (
+                          <p key={name}>{name}</p>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-amber-900">없음</p>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                    <p className="text-xs font-medium text-gray-700">
+                      애매해서 제외
+                    </p>
+                    {availabilityLookupSummary.ambiguous.length > 0 ? (
+                      <div className="mt-2 space-y-1 text-xs text-gray-800">
+                        {availabilityLookupSummary.ambiguous.map((name) => (
+                          <p key={name}>{name}</p>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-gray-800">없음</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {availabilityItems.length > 0 && (
+                <div className="space-y-3">
+                  {availabilityItems.map((item) => (
+                    <div
+                      key={item.email}
+                      className="rounded-xl border border-gray-200 bg-white px-4 py-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium text-gray-900">{item.email}</p>
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-medium ${
+                            item.isFree
+                              ? "bg-green-100 text-green-700"
+                              : "bg-yellow-100 text-yellow-800"
+                          }`}
+                        >
+                          {item.isFree ? "조회 구간 내 충돌 없음" : "일부 시간 busy"}
+                        </span>
+                      </div>
+
+                      {!item.isFree && (
+                        <div className="mt-2 space-y-1 text-xs text-gray-600">
+                          {item.busy.map((busySlot, index) => (
+                            <p key={`${item.email}-${index}`}>
+                              {formatDateTimeForCalendar(busySlot.start)} ~{" "}
+                              {formatDateTimeForCalendar(busySlot.end)}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </details>
-
-        <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
-          <div>
-            <p className="text-xs font-medium text-gray-500">
-              참석자 Availability
-            </p>
-            <p className="mt-1 text-sm text-gray-700">
-              슬롯 확인 상태로 들어가면 참석자 캘린더를 자동 조회해요.
-              조회 결과는 위의 자동 생성 가능 시간과 아래 수동 후보 시간에 함께 반영돼요.
-            </p>
-            {availabilityLoading && (
-              <p className="mt-2 text-xs font-medium text-indigo-700">
-                참석자 캘린더를 자동 조회하는 중이에요.
-              </p>
-            )}
-          </div>
-
-          <p className="mt-3 text-xs text-gray-500">
-            조회 대상 이메일:{" "}
-            {availabilityLookupSummary?.resolvedEmails?.length
-              ? availabilityLookupSummary.resolvedEmails.join("; ")
-              : getParticipantEmails().length > 0
-              ? getParticipantEmails().join("; ")
-              : "없음"}
-          </p>
-
-          {availabilityError && (
-            <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {availabilityError}
-            </div>
-          )}
-
-          {availabilityLookupSummary && (
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                <p className="text-xs font-medium text-emerald-800">
-                  자동 매핑 성공
-                </p>
-                {availabilityLookupSummary.autoMapped.length > 0 ? (
-                  <div className="mt-2 space-y-1 text-xs text-emerald-900">
-                    {availabilityLookupSummary.autoMapped.map((item) => (
-                      <p key={`${item.name}-${item.email}`}>
-                        {item.name}
-                        {" -> "}
-                        {item.email}
-                      </p>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-emerald-900">없음</p>
-                )}
-              </div>
-
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                <p className="text-xs font-medium text-amber-800">
-                  매핑 실패
-                </p>
-                {availabilityLookupSummary.failed.length > 0 ? (
-                  <div className="mt-2 space-y-1 text-xs text-amber-900">
-                    {availabilityLookupSummary.failed.map((name) => (
-                      <p key={name}>{name}</p>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-amber-900">없음</p>
-                )}
-              </div>
-
-              <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
-                <p className="text-xs font-medium text-gray-700">
-                  애매해서 제외
-                </p>
-                {availabilityLookupSummary.ambiguous.length > 0 ? (
-                  <div className="mt-2 space-y-1 text-xs text-gray-800">
-                    {availabilityLookupSummary.ambiguous.map((name) => (
-                      <p key={name}>{name}</p>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-gray-800">없음</p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {availabilityItems.length > 0 && (
-            <div className="mt-4 space-y-3">
-              {availabilityItems.map((item) => (
-                <div
-                  key={item.email}
-                  className="rounded-xl border border-gray-200 bg-white px-4 py-3"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-medium text-gray-900">{item.email}</p>
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-medium ${
-                        item.isFree
-                          ? "bg-green-100 text-green-700"
-                          : "bg-yellow-100 text-yellow-800"
-                      }`}
-                    >
-                      {item.isFree ? "조회 구간 내 충돌 없음" : "일부 시간 busy"}
-                    </span>
-                  </div>
-
-                  {!item.isFree && (
-                    <div className="mt-2 space-y-1 text-xs text-gray-600">
-                      {item.busy.map((busySlot, index) => (
-                        <p key={`${item.email}-${index}`}>
-                          {formatDateTimeForCalendar(busySlot.start)} ~{" "}
-                          {formatDateTimeForCalendar(busySlot.end)}
-                        </p>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
 
         <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
           <div className="mb-4 flex items-center justify-between">
