@@ -2730,6 +2730,62 @@ ${title}
           </div>
         </details>
 
+        {selectedSlot && (
+          <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl bg-gray-50 px-4 py-3">
+                  <p className="text-xs font-medium text-gray-500">시작</p>
+                  <p className="mt-2 text-sm text-gray-900">
+                    {formatDateTimeForCalendar(selectedSlot.start_datetime)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-gray-50 px-4 py-3">
+                  <p className="text-xs font-medium text-gray-500">종료</p>
+                  <p className="mt-2 text-sm text-gray-900">
+                    {formatDateTimeForCalendar(selectedSlot.end_datetime)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyCalendarMessage}
+                  className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black"
+                >
+                  안내 문구 복사
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCopyAttendeeEmails}
+                  className="rounded-xl bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
+                >
+                  참석자 이메일 복사
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenGoogleCalendar}
+                  className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  Google Calendar에서 열기
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCreateCalendarEventViaApi}
+                  className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                >
+                  API route 테스트
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <details className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
           <summary className="cursor-pointer text-sm font-medium text-gray-900">
             {selectedSlot
@@ -2747,22 +2803,6 @@ ${title}
                   </p>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="rounded-xl bg-gray-50 p-4">
-                    <p className="text-xs font-medium text-gray-500">시작</p>
-                    <p className="mt-2 text-sm text-gray-900">
-                      {formatDateTimeForCalendar(selectedSlot.start_datetime)}
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-gray-50 p-4">
-                    <p className="text-xs font-medium text-gray-500">종료</p>
-                    <p className="mt-2 text-sm text-gray-900">
-                      {formatDateTimeForCalendar(selectedSlot.end_datetime)}
-                    </p>
-                  </div>
-                </div>
-
                 <div className="rounded-xl bg-gray-50 p-4">
                   <p className="text-xs font-medium text-gray-500">복사용 안내 문구</p>
                   <pre className="mt-2 whitespace-pre-wrap text-sm text-gray-900">
@@ -2775,40 +2815,6 @@ ${title}
                   <pre className="mt-2 whitespace-pre-wrap text-sm text-gray-900">
                     {buildAttendeeEmailsCopyText() || "-"}
                   </pre>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={handleCopyCalendarMessage}
-                    className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black"
-                  >
-                    안내 문구 복사
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleCopyAttendeeEmails}
-                    className="rounded-xl bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
-                  >
-                    참석자 이메일 복사
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleOpenGoogleCalendar}
-                    className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                  >
-                    Google Calendar에서 열기
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleCreateCalendarEventViaApi}
-                    className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-                  >
-                    API route 테스트
-                  </button>
                 </div>
               </div>
             ) : (
