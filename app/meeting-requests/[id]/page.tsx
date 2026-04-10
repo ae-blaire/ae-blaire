@@ -1655,6 +1655,48 @@ ${title}
     }
   }
 
+  async function enrichParticipantEmailMapFromContacts(
+    displayText: string,
+    currentMap: ParticipantEmailMap
+  ) {
+    const names = parseParticipantNamesText(displayText);
+    const nextMap = { ...currentMap };
+
+    await Promise.all(
+      names.map(async (name) => {
+        const nameKey = getParticipantNameKey(name);
+
+        if (!nameKey || nextMap[nameKey]) {
+          return;
+        }
+
+        try {
+          const response = await fetch(
+            `/api/contacts/search?query=${encodeURIComponent(name)}`
+          );
+          const result = (await response.json()) as {
+            results?: ParticipantSearchResult[];
+          };
+
+          if (!response.ok) {
+            return;
+          }
+
+          if ((result.results || []).length === 1) {
+            const matched = result.results?.[0];
+            if (matched?.email) {
+              nextMap[nameKey] = matched.email.trim().toLowerCase();
+            }
+          }
+        } catch {
+          return;
+        }
+      })
+    );
+
+    return nextMap;
+  }
+
   async function handleCheckAvailability(
     requestSnapshot: MeetingRequest | null = request
   ) {
@@ -2037,9 +2079,13 @@ ${title}
     const normalizedParticipantsText = parseParticipantNamesText(
       latestParticipantsText
     ).join(", ");
-    const nextParticipantEmailMap = pruneParticipantEmailMap(
+    const prunedParticipantEmailMap = pruneParticipantEmailMap(
       normalizedParticipantsText,
       participantEmailMap
+    );
+    const nextParticipantEmailMap = await enrichParticipantEmailMapFromContacts(
+      normalizedParticipantsText,
+      prunedParticipantEmailMap
     );
     const participantsValue = buildParticipantsStorageValueFromEmailMap({
       displayText: normalizedParticipantsText,

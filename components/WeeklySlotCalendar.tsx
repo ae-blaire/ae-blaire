@@ -17,6 +17,15 @@ type WeeklyBusyItem = {
   }>;
 };
 
+type MergedAvailableSlotBlock = {
+  id: string;
+  start_datetime: string;
+  end_datetime: string;
+  slotIds: string[];
+  isRepresentative: boolean;
+  isAvailabilityBacked: boolean;
+};
+
 type WeeklySlotCalendarProps = {
   rangeStart: string | null;
   rangeEnd: string | null;
@@ -154,6 +163,64 @@ function buildTimeLabels() {
   return labels;
 }
 
+function mergeAvailableSlots(slots: WeeklyCalendarSlot[]) {
+  if (slots.length === 0) return [];
+
+  const sorted = [...slots].sort(
+    (a, b) =>
+      new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime()
+  );
+
+  const merged: MergedAvailableSlotBlock[] = [];
+
+  sorted.forEach((slot) => {
+    const last = merged[merged.length - 1];
+
+    if (!last) {
+      merged.push({
+        id: slot.id,
+        start_datetime: slot.start_datetime,
+        end_datetime: slot.end_datetime,
+        slotIds: [slot.id],
+        isRepresentative: slot.isRepresentative,
+        isAvailabilityBacked: slot.isAvailabilityBacked,
+      });
+      return;
+    }
+
+    const currentStart = new Date(slot.start_datetime).getTime();
+    const lastEnd = new Date(last.end_datetime).getTime();
+
+    if (currentStart <= lastEnd) {
+      last.end_datetime =
+        new Date(slot.end_datetime).getTime() > lastEnd
+          ? slot.end_datetime
+          : last.end_datetime;
+      last.slotIds.push(slot.id);
+      last.isRepresentative = last.isRepresentative || slot.isRepresentative;
+      last.isAvailabilityBacked =
+        last.isAvailabilityBacked || slot.isAvailabilityBacked;
+
+      if (!last.isRepresentative && slot.isRepresentative) {
+        last.id = slot.id;
+      }
+
+      return;
+    }
+
+    merged.push({
+      id: slot.id,
+      start_datetime: slot.start_datetime,
+      end_datetime: slot.end_datetime,
+      slotIds: [slot.id],
+      isRepresentative: slot.isRepresentative,
+      isAvailabilityBacked: slot.isAvailabilityBacked,
+    });
+  });
+
+  return merged;
+}
+
 export default function WeeklySlotCalendar({
   rangeStart,
   rangeEnd,
@@ -165,7 +232,6 @@ export default function WeeklySlotCalendar({
   const weeks = buildWeeks(rangeStart, rangeEnd);
   const timeLabels = buildTimeLabels();
   const totalHeight = TOTAL_MINUTES / 30 * ROW_HEIGHT;
-  const hasAvailability = availabilityItems.length > 0;
 
   if (weeks.length === 0) {
     return (
@@ -177,13 +243,6 @@ export default function WeeklySlotCalendar({
 
   return (
     <div className="space-y-6">
-      {!hasAvailability && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          availability 데이터가 아직 없어 추천 슬롯을 전원 공통 가능으로 확정하지 않았어요.
-          지금 그리드는 참고용 시간 축으로만 보여줘요.
-        </div>
-      )}
-
       {weeks.map((week) => (
         <div
           key={week.weekKey}
@@ -233,6 +292,7 @@ export default function WeeklySlotCalendar({
                     new Date(a.start_datetime).getTime() -
                     new Date(b.start_datetime).getTime()
                 );
+              const mergedAvailableBlocks = mergeAvailableSlots(daySlots);
 
               return (
                 <div
@@ -256,18 +316,16 @@ export default function WeeklySlotCalendar({
                     return (
                       <div
                         key={`${dateKey}-busy-${index}`}
-                        className="absolute left-1 right-1 rounded-lg border border-red-200 bg-red-100/80 px-2 py-1 text-[11px] font-medium text-red-700"
+                        className="absolute left-1 right-1 rounded-lg border border-red-200 bg-red-100/80"
                         style={{
                           top: `${(busyStart / 30) * ROW_HEIGHT}px`,
                           height: `${height}px`,
                         }}
-                      >
-                        busy
-                      </div>
+                      />
                     );
                   })}
 
-                  {daySlots.map((slot) => {
+                  {mergedAvailableBlocks.map((slot) => {
                     const slotStart = clamp(
                       getMinutesFromCalendarStart(slot.start_datetime),
                       0,
@@ -279,7 +337,8 @@ export default function WeeklySlotCalendar({
                       TOTAL_MINUTES
                     );
                     const height = Math.max(((slotEnd - slotStart) / 30) * ROW_HEIGHT, ROW_HEIGHT);
-                    const isSelected = selectedSlotId === slot.id;
+                    const isSelected =
+                      selectedSlotId !== null && slot.slotIds.includes(selectedSlotId);
 
                     return (
                       <button
