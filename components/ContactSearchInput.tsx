@@ -104,6 +104,11 @@ export default function ContactSearchInput({
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+          }
+        }}
         onFocus={() => {
           if (query.trim()) setOpen(true);
         }}

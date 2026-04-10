@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import SlotCandidatesSection from "@/components/slot-candidates-section";
 import RiskBadge from "@/components/RiskBadge";
 import ContactSearchInput from "@/components/ContactSearchInput";
+import WeeklySlotCalendar from "@/components/WeeklySlotCalendar";
 import {
   canConfirmRequest,
   canCompleteRequest,
@@ -80,6 +81,17 @@ type GeneratedSlot = {
   reasons: string[];
   window_start: string;
   window_end: string;
+  date_key: string;
+  date_label: string;
+  score: number;
+  isAvailabilityBacked: boolean;
+};
+
+type DateRepresentativeSlot = {
+  date_key: string;
+  date_label: string;
+  representative: GeneratedSlot;
+  alternatives: GeneratedSlot[];
 };
 
 type GeneratedSlotDiagnostics = {
@@ -303,6 +315,94 @@ function formatTimeRangeLabel(start: string, end: string) {
   return `${formatPart(startDate)}~${formatPart(endDate)}`;
 }
 
+function formatDateKey(value: Date | string) {
+  const date = typeof value === "string" ? new Date(value) : value;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
+}
+
+function formatDateLabel(value: Date | string) {
+  const date = typeof value === "string" ? new Date(value) : value;
+  return date.toLocaleDateString("ko-KR", {
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+  });
+}
+
+function normalizeUrgencyForScoring(value: string | null | undefined) {
+  return value?.trim().toLowerCase() || "";
+}
+
+function getUrgencyRecommendationBonus(urgencyLevel: string | null | undefined) {
+  const normalized = normalizeUrgencyForScoring(urgencyLevel);
+
+  if (["high", "urgent", "asap"].includes(normalized)) {
+    return 10;
+  }
+
+  return 0;
+}
+
+function getNearDateBonus(start: Date) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const target = new Date(start);
+  target.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.floor(
+    (target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000)
+  );
+
+  return diffDays >= 0 && diffDays <= 3 ? 5 : 0;
+}
+
+function isCoreOperatingSlot(start: Date, end: Date) {
+  const startMinutes = start.getHours() * 60 + start.getMinutes();
+  const endMinutes = end.getHours() * 60 + end.getMinutes();
+  return startMinutes >= 9 * 60 && endMinutes <= 18 * 60;
+}
+
+function getTimePreferenceScore(start: Date, end: Date) {
+  if (isCoreOperatingSlot(start, end)) {
+    return 20;
+  }
+
+  const startMinutes = start.getHours() * 60 + start.getMinutes();
+  const endMinutes = end.getHours() * 60 + end.getMinutes();
+
+  if (startMinutes < 9 * 60) {
+    return 8;
+  }
+
+  if (endMinutes > 18 * 60) {
+    return 7;
+  }
+
+  return 4;
+}
+
+function getGeneratedSlotScore(
+  start: Date,
+  end: Date,
+  urgencyLevel: string | null | undefined
+) {
+  let score = 0;
+  score += getTimePreferenceScore(start, end);
+  score += getUrgencyRecommendationBonus(urgencyLevel);
+  score += getNearDateBonus(start);
+  score += start.getMinutes() === 0 ? 3 : 0;
+  score -= getLunchPenalty(start, end) * 4;
+
+  if (start.getHours() < 8 || end.getHours() > 19) {
+    score -= 2;
+  }
+
+  return score;
+}
+
 function buildResolvedParticipantContacts(
   participantsValue: unknown,
   lookupSummary: AvailabilityLookupSummary | null
@@ -368,9 +468,19 @@ type InternalGeneratedSlot = {
 };
 
 type GeneratedSlotWindow = {
+  id: string;
+  date_key: string;
+  date_label: string;
   window_start: string;
   window_end: string;
   candidates: InternalGeneratedSlot[];
+};
+
+type GeneratedSlotRecommendationResult = {
+  slots: GeneratedSlot[];
+  windowRepresentatives: GeneratedSlot[];
+  dailyRepresentatives: DateRepresentativeSlot[];
+  diagnostics: GeneratedSlotDiagnostics;
 };
 
 function groupGeneratedSlotsByWindow(slots: InternalGeneratedSlot[]) {
@@ -388,6 +498,9 @@ function groupGeneratedSlotsByWindow(slots: InternalGeneratedSlot[]) {
 
     if (!lastGroup) {
       groups.push({
+        id: `${formatDateKey(slot.start_datetime)}-${slot.start_datetime}-${slot.end_datetime}`,
+        date_key: formatDateKey(slot.start_datetime),
+        date_label: formatDateLabel(slot.start_datetime),
         window_start: slot.start_datetime,
         window_end: slot.end_datetime,
         candidates: [slot],
@@ -411,6 +524,9 @@ function groupGeneratedSlotsByWindow(slots: InternalGeneratedSlot[]) {
     }
 
     groups.push({
+      id: `${formatDateKey(slot.start_datetime)}-${slot.start_datetime}-${slot.end_datetime}`,
+      date_key: formatDateKey(slot.start_datetime),
+      date_label: formatDateLabel(slot.start_datetime),
       window_start: slot.start_datetime,
       window_end: slot.end_datetime,
       candidates: [slot],
@@ -429,20 +545,35 @@ function formatDateRangeDebugLabel(start: Date, end: Date) {
   return `${format(start)} ~ ${format(end)}`;
 }
 
+function compareGeneratedSlots(a: GeneratedSlot, b: GeneratedSlot) {
+  if (a.score !== b.score) return b.score - a.score;
+
+  const aStart = new Date(a.start_datetime);
+  const bStart = new Date(b.start_datetime);
+  const aIsCore = isCoreOperatingSlot(aStart, new Date(a.end_datetime));
+  const bIsCore = isCoreOperatingSlot(bStart, new Date(b.end_datetime));
+
+  if (aIsCore !== bIsCore) return aIsCore ? -1 : 1;
+  if (aStart.getMinutes() !== bStart.getMinutes()) {
+    return aStart.getMinutes() === 0 ? -1 : 1;
+  }
+
+  return aStart.getTime() - bStart.getTime();
+}
+
 function getGeneratedSlotRecommendationResult({
   preferredRange,
   durationMinutes,
   availabilityItems,
+  urgencyLevel,
   limit = 3,
 }: {
   preferredRange: string | null;
   durationMinutes: number | null;
   availabilityItems: AvailabilityItem[];
+  urgencyLevel: string | null | undefined;
   limit?: number;
-}): {
-  slots: GeneratedSlot[];
-  diagnostics: GeneratedSlotDiagnostics;
-} {
+}): GeneratedSlotRecommendationResult {
   const parsedRange = parsePreferredDateRange(preferredRange);
   const effectiveDurationMinutes = getEffectiveDurationMinutes(durationMinutes);
   const baseDiagnostics: GeneratedSlotDiagnostics = {
@@ -464,6 +595,8 @@ function getGeneratedSlotRecommendationResult({
   if (!parsedRange) {
     return {
       slots: [],
+      windowRepresentatives: [],
+      dailyRepresentatives: [],
       diagnostics: {
         ...baseDiagnostics,
         zeroReason: "missing_range",
@@ -474,6 +607,8 @@ function getGeneratedSlotRecommendationResult({
   if (availabilityItems.length === 0) {
     return {
       slots: [],
+      windowRepresentatives: [],
+      dailyRepresentatives: [],
       diagnostics: {
         ...baseDiagnostics,
         zeroReason: "missing_availability",
@@ -540,47 +675,66 @@ function getGeneratedSlotRecommendationResult({
   }
 
   const groupedSlots = groupGeneratedSlotsByWindow(generatedSlots);
-  const recommendedSlots = groupedSlots
+  const windowRepresentatives = groupedSlots
     .map((group) => {
-      const representative = [...group.candidates].sort((a, b) => {
-        if (a.priority !== b.priority) return a.priority - b.priority;
-        if (a.lunchPenalty !== b.lunchPenalty) return a.lunchPenalty - b.lunchPenalty;
-        if (a.isOnTheHour !== b.isOnTheHour) return a.isOnTheHour ? -1 : 1;
-        return (
-          new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime()
-        );
-      })[0];
+      const representativeCandidate = [...group.candidates]
+        .map((candidate) => {
+          const start = new Date(candidate.start_datetime);
+          const end = new Date(candidate.end_datetime);
+          const score = getGeneratedSlotScore(start, end, urgencyLevel);
+
+          return {
+            id: `${group.id}-${candidate.start_datetime}`,
+            start_datetime: candidate.start_datetime,
+            end_datetime: candidate.end_datetime,
+            window_start: group.window_start,
+            window_end: group.window_end,
+            date_key: group.date_key,
+            date_label: group.date_label,
+            score,
+            isAvailabilityBacked: true,
+            reasons: [
+              "전원 공통 가능",
+              "희망 시기 범위 내",
+              "주간 관점 비교",
+              "운영 친화 시간 우선",
+            ],
+          } satisfies GeneratedSlot;
+        })
+        .sort(compareGeneratedSlots)[0];
+
+      return representativeCandidate;
+    })
+    .sort(compareGeneratedSlots);
+
+  const dailyRecommendationMap = new Map<string, GeneratedSlot[]>();
+  windowRepresentatives.forEach((slot) => {
+    const existing = dailyRecommendationMap.get(slot.date_key) || [];
+    existing.push(slot);
+    dailyRecommendationMap.set(slot.date_key, existing);
+  });
+
+  const dailyRepresentatives = Array.from(dailyRecommendationMap.entries())
+    .map(([dateKey, slots]) => {
+      const sortedSlots = [...slots].sort(compareGeneratedSlots);
+      const representative = sortedSlots[0];
 
       return {
-        id: `${group.window_start}-${group.window_end}`,
-        start_datetime: representative.start_datetime,
-        end_datetime: representative.end_datetime,
-        window_start: group.window_start,
-        window_end: group.window_end,
-        reasons: [
-          "전원 공통 가능",
-          "희망 시기 범위 내",
-          "주간 핵심 운영 시간대",
-          "가까운 날짜 우선",
-        ],
-      };
+        date_key: dateKey,
+        date_label: representative.date_label,
+        representative,
+        alternatives: sortedSlots.slice(1),
+      } satisfies DateRepresentativeSlot;
     })
-    .sort((a, b) => {
-      const aPriority = getGeneratedSlotPriority(
-        new Date(a.start_datetime),
-        new Date(a.end_datetime)
-      );
-      const bPriority = getGeneratedSlotPriority(
-        new Date(b.start_datetime),
-        new Date(b.end_datetime)
-      );
+    .sort(
+      (a, b) =>
+        new Date(a.representative.start_datetime).getTime() -
+        new Date(b.representative.start_datetime).getTime()
+    );
 
-      if (aPriority !== bPriority) return aPriority - bPriority;
-      return (
-        new Date(a.start_datetime).getTime() - new Date(b.start_datetime).getTime()
-      );
-    })
-    .slice(0, limit);
+  const recommendedSlots = dailyRepresentatives
+    .map((item) => item.representative)
+    .slice(0, Math.max(limit, dailyRepresentatives.length));
 
   const zeroReason =
     weekdayRangeDays === 0
@@ -591,6 +745,8 @@ function getGeneratedSlotRecommendationResult({
 
   return {
     slots: recommendedSlots,
+    windowRepresentatives,
+    dailyRepresentatives,
     diagnostics: {
       ...baseDiagnostics,
       weekdayRangeDays,
@@ -620,6 +776,10 @@ export default function MeetingRequestDetailPage() {
   const [availabilityError, setAvailabilityError] = useState("");
   const [availabilityLookupSummary, setAvailabilityLookupSummary] =
     useState<AvailabilityLookupSummary | null>(null);
+  const [draftSelectedGeneratedSlotId, setDraftSelectedGeneratedSlotId] = useState<
+    string | null
+  >(null);
+  const [showParticipantSearch, setShowParticipantSearch] = useState(false);
   const [participantEmailMap, setParticipantEmailMap] = useState<ParticipantEmailMap>(
     {}
   );
@@ -740,6 +900,7 @@ export default function MeetingRequestDetailPage() {
       preferredRange: request?.preferred_date_range || null,
       durationMinutes: request?.duration_minutes || null,
       availabilityItems,
+      urgencyLevel: request?.urgency_level ?? request?.urgency ?? null,
       limit: 3,
     });
     console.info("[generated-slot-debug]", {
@@ -755,9 +916,34 @@ export default function MeetingRequestDetailPage() {
       zero_reason: result.diagnostics.zeroReason,
     });
     return result;
-  }, [availabilityItems, request?.duration_minutes, request?.preferred_date_range]);
+  }, [
+    availabilityItems,
+    request?.duration_minutes,
+    request?.preferred_date_range,
+    request?.urgency,
+    request?.urgency_level,
+  ]);
 
-  const generatedRecommendedSlots = generatedRecommendationResult.slots;
+  const generatedWindowRepresentativeSlots = generatedRecommendationResult.windowRepresentatives;
+  const dailyRepresentativeSlots = generatedRecommendationResult.dailyRepresentatives;
+  const parsedPreferredRange = useMemo(
+    () => parsePreferredDateRange(request?.preferred_date_range || null),
+    [request?.preferred_date_range]
+  );
+  const draftSelectedGeneratedSlot =
+    generatedWindowRepresentativeSlots.find((slot) => slot.id === draftSelectedGeneratedSlotId) ||
+    null;
+
+  useEffect(() => {
+    if (
+      draftSelectedGeneratedSlotId &&
+      !generatedWindowRepresentativeSlots.some(
+        (slot) => slot.id === draftSelectedGeneratedSlotId
+      )
+    ) {
+      setDraftSelectedGeneratedSlotId(null);
+    }
+  }, [draftSelectedGeneratedSlotId, generatedWindowRepresentativeSlots]);
 
   async function createChecklistIfNeeded(meetingRequestId: string | number) {
     const { data: existingChecklist, error: checkError } = await supabase
@@ -1699,6 +1885,7 @@ ${title}
       }
 
       await createChecklistIfNeeded(request.id);
+      setDraftSelectedGeneratedSlotId(null);
       await fetchDetail();
       toast.success("추천 시간을 확정했어요.");
     } catch (error) {
@@ -1784,6 +1971,7 @@ ${title}
       ...prev,
       [getParticipantNameKey(candidate.name)]: candidate.email.trim().toLowerCase(),
     }));
+    setShowParticipantSearch(false);
     toast.success(`${normalizeParticipantName(candidate.name)} 참석자를 반영했어요.`);
   }
 
@@ -2131,11 +2319,22 @@ ${title}
                 </p>
 
                 <div className="mt-3 rounded-xl bg-gray-50 p-3">
-                  <ContactSearchInput
-                    onSelect={handleSelectParticipant}
-                    placeholder="이름 또는 이메일로 검색"
-                    label="참가자 검색"
-                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowParticipantSearch((prev) => !prev)}
+                    className="mt-2 text-xs text-gray-500 underline"
+                  >
+                    {showParticipantSearch ? "검색 닫기" : "🔍 검색으로 추가"}
+                  </button>
+                  {showParticipantSearch && (
+                    <div className="mt-3">
+                      <ContactSearchInput
+                        onSelect={handleSelectParticipant}
+                        placeholder="이름 또는 이메일로 검색"
+                        label="참가자 검색"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2297,86 +2496,237 @@ ${title}
           <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
             <div className="mb-4">
               <h3 className="text-lg font-semibold text-gray-900">
-                캘린더 기반 자동 생성 가능 시간
+                캘린더 기반 날짜별 대표 추천
               </h3>
               <p className="mt-1 text-sm text-gray-600">
-                Availability 결과를 바탕으로 희망 시기 범위 안에서 전원 공통 가능 시간을 새로 생성했어요.
-                시간 생성 범위는 주중 07:00~20:00 전체이고, 추천은 09:00~18:00 핵심 시간대를 우선해요.
-                추천 계산에서는 시간형 일정만 busy로 반영하고, 종일 일정과 transparent 일정은 제외해요.
+                Availability 결과를 바탕으로 희망 기간의 각 날짜마다 대표 슬롯 1개를 먼저 고르고,
+                같은 날짜의 다른 가능 시간은 접어서 비교할 수 있게 정리했어요. 추천 계산은 주중 07:00~20:00
+                전체에서 만들되, 09:00~18:00 핵심 시간대와 운영 친화적인 정각 시작을 우선해요.
               </p>
               <p className="mt-2 text-xs font-medium text-indigo-700">
-                겹치는 연속 가능 슬롯은 하나의 가능 구간으로 묶고, 각 구간에서 대표 추천 시간 1개만 보여줘요.
+                urgency=high 계열은 +10, 오늘 기준 3일 이내 슬롯은 +5 가산점을 적용하고,
+                점심 애매한 시간과 너무 이르거나 늦은 시간은 뒤로 보내요.
               </p>
             </div>
 
-            {generatedRecommendedSlots.length > 0 ? (
-              <div className="space-y-3">
-                {generatedRecommendedSlots.map((slot, index) => (
-                  <div
-                    key={slot.id}
-                    className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-indigo-900">
-                          추천 {index + 1}
-                        </p>
-                        <p className="mt-1 text-sm text-indigo-900">
-                          {formatDate(slot.window_start)} 중{" "}
-                          {formatDuration(
-                            getEffectiveDurationMinutes(request.duration_minutes)
-                          )}
-                        </p>
-                        <p className="mt-1 text-sm text-indigo-700">
-                          가능 구간: {formatTimeRangeLabel(slot.window_start, slot.window_end)}
-                        </p>
-                        <p className="mt-1 text-sm font-medium text-indigo-900">
-                          대표 추천: {formatTimeRangeLabel(slot.start_datetime, slot.end_datetime)}
-                        </p>
-                      </div>
-
-                      <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
-                        전원 공통 가능
-                      </span>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {slot.reasons.map((reason) => (
-                        <span
-                          key={`${slot.id}-${reason}`}
-                          className="rounded-full bg-white px-3 py-1 text-xs text-gray-700 ring-1 ring-gray-200"
-                        >
-                          {reason}
-                        </span>
-                      ))}
-                    </div>
-
-                    <div className="mt-4">
-                      <button
-                        type="button"
-                        onClick={() => handleConfirmGeneratedSlot(slot)}
-                        disabled={updating}
-                        className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-indigo-300"
-                      >
-                        {updating ? "처리중..." : "이 시간으로 확정"}
-                      </button>
-                    </div>
+            {draftSelectedGeneratedSlot && (
+              <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-indigo-900">
+                      선택한 자동 추천 슬롯
+                    </p>
+                    <p className="mt-1 text-sm text-indigo-800">
+                      {draftSelectedGeneratedSlot.date_label}{" "}
+                      {formatTimeRangeLabel(
+                        draftSelectedGeneratedSlot.start_datetime,
+                        draftSelectedGeneratedSlot.end_datetime
+                      )}
+                    </p>
                   </div>
-                ))}
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDraftSelectedGeneratedSlotId(null)}
+                      className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50"
+                    >
+                      선택 해제
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmGeneratedSlot(draftSelectedGeneratedSlot)}
+                      disabled={updating}
+                      className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-indigo-300"
+                    >
+                      {updating ? "처리중..." : "이 시간으로 확정"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {dailyRepresentativeSlots.length > 0 ? (
+              <div className="space-y-4">
+                <div className="grid gap-3 lg:grid-cols-3">
+                  {dailyRepresentativeSlots.map((item, index) => {
+                    const slot = item.representative;
+                    const isSelected = draftSelectedGeneratedSlotId === slot.id;
+
+                    return (
+                      <div
+                        key={item.date_key}
+                        className={[
+                          "rounded-xl border px-4 py-4 transition",
+                          isSelected
+                            ? "border-indigo-300 bg-indigo-50"
+                            : "border-indigo-100 bg-white hover:border-indigo-200",
+                        ].join(" ")}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-indigo-900">
+                              추천 {index + 1}
+                            </p>
+                            <p className="mt-1 text-sm font-medium text-gray-900">
+                              {item.date_label}
+                            </p>
+                            <p className="mt-1 text-sm text-indigo-700">
+                              {formatTimeRangeLabel(slot.window_start, slot.window_end)} 중{" "}
+                              {formatDuration(getEffectiveDurationMinutes(request.duration_minutes))}
+                            </p>
+                            <p className="mt-1 text-sm font-medium text-indigo-900">
+                              대표 추천:{" "}
+                              {formatTimeRangeLabel(slot.start_datetime, slot.end_datetime)}
+                            </p>
+                          </div>
+
+                          <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+                            전원 공통 가능
+                          </span>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {slot.reasons.map((reason) => (
+                            <span
+                              key={`${slot.id}-${reason}`}
+                              className="rounded-full bg-gray-50 px-3 py-1 text-xs text-gray-700 ring-1 ring-gray-200"
+                            >
+                              {reason}
+                            </span>
+                          ))}
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setDraftSelectedGeneratedSlotId(slot.id)}
+                            className={[
+                              "rounded-xl px-4 py-2 text-sm font-medium",
+                              isSelected
+                                ? "bg-indigo-700 text-white"
+                                : "bg-indigo-100 text-indigo-900 hover:bg-indigo-200",
+                            ].join(" ")}
+                          >
+                            {isSelected ? "선택됨" : "이 시간 선택"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleConfirmGeneratedSlot(slot)}
+                            disabled={updating}
+                            className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:bg-gray-100"
+                          >
+                            {updating ? "처리중..." : "바로 확정"}
+                          </button>
+                        </div>
+
+                        {item.alternatives.length > 0 && (
+                          <details className="mt-4 rounded-xl bg-gray-50 px-3 py-3">
+                            <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                              같은 날짜의 다른 가능 슬롯 {item.alternatives.length}개 보기
+                            </summary>
+                            <div className="mt-3 space-y-2">
+                              {item.alternatives.map((alternative) => (
+                                <button
+                                  key={alternative.id}
+                                  type="button"
+                                  onClick={() =>
+                                    setDraftSelectedGeneratedSlotId(alternative.id)
+                                  }
+                                  className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-sm text-gray-700 hover:border-indigo-200 hover:bg-indigo-50"
+                                >
+                                  <span>
+                                    {formatTimeRangeLabel(
+                                      alternative.start_datetime,
+                                      alternative.end_datetime
+                                    )}
+                                  </span>
+                                  <span className="text-xs text-gray-500">
+                                    가능 구간 {formatTimeRangeLabel(
+                                      alternative.window_start,
+                                      alternative.window_end
+                                    )}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="mb-3">
+                    <p className="text-sm font-semibold text-gray-900">
+                      주간 캘린더형 슬롯 선택
+                    </p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      30분 단위 그리드로 주간 비교를 볼 수 있어요. 같은 슬롯에 걸친 셀은 모두 같은
+                      슬롯으로 연결되고, 아무 셀을 눌러도 그 슬롯 전체가 선택돼요.
+                    </p>
+                  </div>
+
+                  <WeeklySlotCalendar
+                    rangeStart={parsedPreferredRange?.start.toISOString() || null}
+                    rangeEnd={parsedPreferredRange?.end.toISOString() || null}
+                    slots={generatedWindowRepresentativeSlots.map((slot) => ({
+                      id: slot.id,
+                      start_datetime: slot.start_datetime,
+                      end_datetime: slot.end_datetime,
+                      date_key: slot.date_key,
+                      isRepresentative: dailyRepresentativeSlots.some(
+                        (item) => item.representative.id === slot.id
+                      ),
+                      isAvailabilityBacked: slot.isAvailabilityBacked,
+                    }))}
+                    availabilityItems={availabilityItems}
+                    selectedSlotId={draftSelectedGeneratedSlotId}
+                    onSelectSlot={(slotId) => {
+                      setDraftSelectedGeneratedSlotId(slotId);
+                    }}
+                  />
+                </div>
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-4 text-sm text-gray-600">
-                <p>희망 시기 범위 안에서 전원 공통 가능 시간을 찾지 못했어요.</p>
-                <p className="mt-2 text-xs text-gray-500">
-                  진단: range=
-                  {generatedRecommendationResult.diagnostics.parsedRangeLabel || "없음"},
-                  duration=
-                  {generatedRecommendationResult.diagnostics.effectiveDurationMinutes}분,
-                  availability={generatedRecommendationResult.diagnostics.availabilityItemsCount},
-                  raw={generatedRecommendationResult.diagnostics.rawCandidateCount},
-                  pass={generatedRecommendationResult.diagnostics.availableCandidateCount},
-                  final={generatedRecommendationResult.diagnostics.finalRecommendationCount}
-                </p>
+              <div className="space-y-4">
+                <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-4 text-sm text-gray-600">
+                  <p>희망 시기 범위 안에서 전원 공통 가능 시간을 찾지 못했어요.</p>
+                  <p className="mt-2 text-xs text-gray-500">
+                    진단: range=
+                    {generatedRecommendationResult.diagnostics.parsedRangeLabel || "없음"},
+                    duration=
+                    {generatedRecommendationResult.diagnostics.effectiveDurationMinutes}분,
+                    availability={generatedRecommendationResult.diagnostics.availabilityItemsCount},
+                    raw={generatedRecommendationResult.diagnostics.rawCandidateCount},
+                    pass={generatedRecommendationResult.diagnostics.availableCandidateCount},
+                    final={generatedRecommendationResult.diagnostics.finalRecommendationCount}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="mb-3">
+                    <p className="text-sm font-semibold text-gray-900">
+                      주간 캘린더형 슬롯 선택
+                    </p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      아직 추천 가능한 대표 슬롯은 없지만, 주간 시간 축과 busy 분포는 그대로 비교할 수 있어요.
+                    </p>
+                  </div>
+
+                  <WeeklySlotCalendar
+                    rangeStart={parsedPreferredRange?.start.toISOString() || null}
+                    rangeEnd={parsedPreferredRange?.end.toISOString() || null}
+                    slots={[]}
+                    availabilityItems={availabilityItems}
+                    selectedSlotId={draftSelectedGeneratedSlotId}
+                    onSelectSlot={(slotId) => {
+                      setDraftSelectedGeneratedSlotId(slotId);
+                    }}
+                  />
+                </div>
               </div>
             )}
           </div>

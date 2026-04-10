@@ -61,6 +61,7 @@ export default function NewRequestPage() {
   const [form, setForm] = useState<FormData>(initialForm);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
   const [participantEmailMap, setParticipantEmailMap] = useState<Record<string, string>>(
     {}
   );
@@ -221,6 +222,7 @@ export default function NewRequestPage() {
       ...prev,
       [getParticipantNameKey(normalizedName)]: contact.email.trim().toLowerCase(),
     }));
+    setShowSearch(false);
   }
 
   return (
@@ -272,9 +274,6 @@ export default function NewRequestPage() {
             <label className="mb-1 block text-sm font-medium text-gray-700">
               참석자
             </label>
-            <div className="mb-3">
-              <ContactSearchInput onSelect={handleSelectParticipant} />
-            </div>
             <input
               type="text"
               name="attendees"
@@ -289,6 +288,18 @@ export default function NewRequestPage() {
             <p className="mt-1 text-xs text-gray-400">
               여러 명이면 쉼표로 구분해서 적어주세요. 이메일은 뒤에서 자동으로 보완돼요.
             </p>
+            <button
+              type="button"
+              onClick={() => setShowSearch((prev) => !prev)}
+              className="mt-2 text-xs text-gray-500 underline"
+            >
+              {showSearch ? "검색 닫기" : "🔍 검색으로 추가"}
+            </button>
+            {showSearch && (
+              <div className="mt-3">
+                <ContactSearchInput onSelect={handleSelectParticipant} />
+              </div>
+            )}
           </div>
 
           <div>
