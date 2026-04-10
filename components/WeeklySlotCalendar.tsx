@@ -291,7 +291,7 @@ export default function WeeklySlotCalendar({
                           isSelected
                             ? "z-20 border-indigo-700 bg-indigo-700 text-white ring-2 ring-indigo-300"
                             : slot.isRepresentative
-                            ? "z-10 border-indigo-300 bg-indigo-100 text-indigo-900 hover:bg-indigo-200"
+                            ? "z-10 border-lime-400 bg-lime-100 text-lime-950 ring-1 ring-lime-200 hover:bg-lime-200"
                             : "z-10 border-emerald-200 bg-emerald-50 text-emerald-900 hover:bg-emerald-100",
                         ].join(" ")}
                         style={{
@@ -307,9 +307,6 @@ export default function WeeklySlotCalendar({
                         })}`}
                       >
                         <div className="text-[11px] font-semibold">
-                          {slot.isRepresentative ? "대표 추천" : "가능 슬롯"}
-                        </div>
-                        <div className="mt-1 text-[11px]">
                           {new Date(slot.start_datetime).toLocaleTimeString("ko-KR", {
                             hour: "2-digit",
                             minute: "2-digit",
@@ -320,9 +317,6 @@ export default function WeeklySlotCalendar({
                             minute: "2-digit",
                           })}
                         </div>
-                        {!slot.isAvailabilityBacked && (
-                          <div className="mt-1 text-[10px] opacity-80">참고용</div>
-                        )}
                       </button>
                     );
                   })}

@@ -478,6 +478,7 @@ type GeneratedSlotWindow = {
 
 type GeneratedSlotRecommendationResult = {
   slots: GeneratedSlot[];
+  allAvailableSlots: GeneratedSlot[];
   windowRepresentatives: GeneratedSlot[];
   dailyRepresentatives: DateRepresentativeSlot[];
   diagnostics: GeneratedSlotDiagnostics;
@@ -595,6 +596,7 @@ function getGeneratedSlotRecommendationResult({
   if (!parsedRange) {
     return {
       slots: [],
+      allAvailableSlots: [],
       windowRepresentatives: [],
       dailyRepresentatives: [],
       diagnostics: {
@@ -607,6 +609,7 @@ function getGeneratedSlotRecommendationResult({
   if (availabilityItems.length === 0) {
     return {
       slots: [],
+      allAvailableSlots: [],
       windowRepresentatives: [],
       dailyRepresentatives: [],
       diagnostics: {
@@ -673,6 +676,31 @@ function getGeneratedSlotRecommendationResult({
       }
     }
   }
+
+  const allAvailableSlots = generatedSlots
+    .map((candidate) => {
+      const start = new Date(candidate.start_datetime);
+      const end = new Date(candidate.end_datetime);
+
+      return {
+        id: `${formatDateKey(candidate.start_datetime)}-${candidate.start_datetime}-${candidate.end_datetime}`,
+        start_datetime: candidate.start_datetime,
+        end_datetime: candidate.end_datetime,
+        window_start: candidate.start_datetime,
+        window_end: candidate.end_datetime,
+        date_key: formatDateKey(candidate.start_datetime),
+        date_label: formatDateLabel(candidate.start_datetime),
+        score: getGeneratedSlotScore(start, end, urgencyLevel),
+        isAvailabilityBacked: true,
+        reasons: [
+          "전원 공통 가능",
+          "희망 시기 범위 내",
+          "주간 관점 비교",
+          "운영 친화 시간 우선",
+        ],
+      } satisfies GeneratedSlot;
+    })
+    .sort(compareGeneratedSlots);
 
   const groupedSlots = groupGeneratedSlotsByWindow(generatedSlots);
   const windowRepresentatives = groupedSlots
@@ -745,6 +773,7 @@ function getGeneratedSlotRecommendationResult({
 
   return {
     slots: recommendedSlots,
+    allAvailableSlots,
     windowRepresentatives,
     dailyRepresentatives,
     diagnostics: {
@@ -924,26 +953,25 @@ export default function MeetingRequestDetailPage() {
     request?.urgency_level,
   ]);
 
-  const generatedWindowRepresentativeSlots = generatedRecommendationResult.windowRepresentatives;
+  const generatedAllAvailableSlots = generatedRecommendationResult.allAvailableSlots;
   const dailyRepresentativeSlots = generatedRecommendationResult.dailyRepresentatives;
   const parsedPreferredRange = useMemo(
     () => parsePreferredDateRange(request?.preferred_date_range || null),
     [request?.preferred_date_range]
   );
   const draftSelectedGeneratedSlot =
-    generatedWindowRepresentativeSlots.find((slot) => slot.id === draftSelectedGeneratedSlotId) ||
-    null;
+    generatedAllAvailableSlots.find((slot) => slot.id === draftSelectedGeneratedSlotId) || null;
 
   useEffect(() => {
     if (
       draftSelectedGeneratedSlotId &&
-      !generatedWindowRepresentativeSlots.some(
+      !generatedAllAvailableSlots.some(
         (slot) => slot.id === draftSelectedGeneratedSlotId
       )
     ) {
       setDraftSelectedGeneratedSlotId(null);
     }
-  }, [draftSelectedGeneratedSlotId, generatedWindowRepresentativeSlots]);
+  }, [draftSelectedGeneratedSlotId, generatedAllAvailableSlots]);
 
   async function createChecklistIfNeeded(meetingRequestId: string | number) {
     const { data: existingChecklist, error: checkError } = await supabase
@@ -2494,27 +2522,12 @@ ${title}
           Boolean(availabilityError) ||
           Boolean(availabilityLookupSummary)) && (
           <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
-            <div className="mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">
-                캘린더 기반 날짜별 대표 추천
-              </h3>
-              <p className="mt-1 text-sm text-gray-600">
-                Availability 결과를 바탕으로 희망 기간의 각 날짜마다 대표 슬롯 1개를 먼저 고르고,
-                같은 날짜의 다른 가능 시간은 접어서 비교할 수 있게 정리했어요. 추천 계산은 주중 07:00~20:00
-                전체에서 만들되, 09:00~18:00 핵심 시간대와 운영 친화적인 정각 시작을 우선해요.
-              </p>
-              <p className="mt-2 text-xs font-medium text-indigo-700">
-                urgency=high 계열은 +10, 오늘 기준 3일 이내 슬롯은 +5 가산점을 적용하고,
-                점심 애매한 시간과 너무 이르거나 늦은 시간은 뒤로 보내요.
-              </p>
-            </div>
-
             {draftSelectedGeneratedSlot && (
               <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-indigo-900">
-                      선택한 자동 추천 슬롯
+                      선택한 슬롯
                     </p>
                     <p className="mt-1 text-sm text-indigo-800">
                       {draftSelectedGeneratedSlot.date_label}{" "}
@@ -2546,133 +2559,13 @@ ${title}
               </div>
             )}
 
-            {dailyRepresentativeSlots.length > 0 ? (
+            {generatedAllAvailableSlots.length > 0 ? (
               <div className="space-y-4">
-                <div className="grid gap-3 lg:grid-cols-3">
-                  {dailyRepresentativeSlots.map((item, index) => {
-                    const slot = item.representative;
-                    const isSelected = draftSelectedGeneratedSlotId === slot.id;
-
-                    return (
-                      <div
-                        key={item.date_key}
-                        className={[
-                          "rounded-xl border px-4 py-4 transition",
-                          isSelected
-                            ? "border-indigo-300 bg-indigo-50"
-                            : "border-indigo-100 bg-white hover:border-indigo-200",
-                        ].join(" ")}
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold text-indigo-900">
-                              추천 {index + 1}
-                            </p>
-                            <p className="mt-1 text-sm font-medium text-gray-900">
-                              {item.date_label}
-                            </p>
-                            <p className="mt-1 text-sm text-indigo-700">
-                              {formatTimeRangeLabel(slot.window_start, slot.window_end)} 중{" "}
-                              {formatDuration(getEffectiveDurationMinutes(request.duration_minutes))}
-                            </p>
-                            <p className="mt-1 text-sm font-medium text-indigo-900">
-                              대표 추천:{" "}
-                              {formatTimeRangeLabel(slot.start_datetime, slot.end_datetime)}
-                            </p>
-                          </div>
-
-                          <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
-                            전원 공통 가능
-                          </span>
-                        </div>
-
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {slot.reasons.map((reason) => (
-                            <span
-                              key={`${slot.id}-${reason}`}
-                              className="rounded-full bg-gray-50 px-3 py-1 text-xs text-gray-700 ring-1 ring-gray-200"
-                            >
-                              {reason}
-                            </span>
-                          ))}
-                        </div>
-
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setDraftSelectedGeneratedSlotId(slot.id)}
-                            className={[
-                              "rounded-xl px-4 py-2 text-sm font-medium",
-                              isSelected
-                                ? "bg-indigo-700 text-white"
-                                : "bg-indigo-100 text-indigo-900 hover:bg-indigo-200",
-                            ].join(" ")}
-                          >
-                            {isSelected ? "선택됨" : "이 시간 선택"}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleConfirmGeneratedSlot(slot)}
-                            disabled={updating}
-                            className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:bg-gray-100"
-                          >
-                            {updating ? "처리중..." : "바로 확정"}
-                          </button>
-                        </div>
-
-                        {item.alternatives.length > 0 && (
-                          <details className="mt-4 rounded-xl bg-gray-50 px-3 py-3">
-                            <summary className="cursor-pointer text-sm font-medium text-gray-700">
-                              같은 날짜의 다른 가능 슬롯 {item.alternatives.length}개 보기
-                            </summary>
-                            <div className="mt-3 space-y-2">
-                              {item.alternatives.map((alternative) => (
-                                <button
-                                  key={alternative.id}
-                                  type="button"
-                                  onClick={() =>
-                                    setDraftSelectedGeneratedSlotId(alternative.id)
-                                  }
-                                  className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-sm text-gray-700 hover:border-indigo-200 hover:bg-indigo-50"
-                                >
-                                  <span>
-                                    {formatTimeRangeLabel(
-                                      alternative.start_datetime,
-                                      alternative.end_datetime
-                                    )}
-                                  </span>
-                                  <span className="text-xs text-gray-500">
-                                    가능 구간 {formatTimeRangeLabel(
-                                      alternative.window_start,
-                                      alternative.window_end
-                                    )}
-                                  </span>
-                                </button>
-                              ))}
-                            </div>
-                          </details>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
                 <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                  <div className="mb-3">
-                    <p className="text-sm font-semibold text-gray-900">
-                      주간 캘린더형 슬롯 선택
-                    </p>
-                    <p className="mt-1 text-xs text-gray-600">
-                      30분 단위 그리드로 주간 비교를 볼 수 있어요. 같은 슬롯에 걸친 셀은 모두 같은
-                      슬롯으로 연결되고, 아무 셀을 눌러도 그 슬롯 전체가 선택돼요.
-                    </p>
-                  </div>
-
                   <WeeklySlotCalendar
                     rangeStart={parsedPreferredRange?.start.toISOString() || null}
                     rangeEnd={parsedPreferredRange?.end.toISOString() || null}
-                    slots={generatedWindowRepresentativeSlots.map((slot) => ({
+                    slots={generatedAllAvailableSlots.map((slot) => ({
                       id: slot.id,
                       start_datetime: slot.start_datetime,
                       end_datetime: slot.end_datetime,
@@ -2707,15 +2600,6 @@ ${title}
                 </div>
 
                 <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                  <div className="mb-3">
-                    <p className="text-sm font-semibold text-gray-900">
-                      주간 캘린더형 슬롯 선택
-                    </p>
-                    <p className="mt-1 text-xs text-gray-600">
-                      아직 추천 가능한 대표 슬롯은 없지만, 주간 시간 축과 busy 분포는 그대로 비교할 수 있어요.
-                    </p>
-                  </div>
-
                   <WeeklySlotCalendar
                     rangeStart={parsedPreferredRange?.start.toISOString() || null}
                     rangeEnd={parsedPreferredRange?.end.toISOString() || null}
@@ -2732,18 +2616,22 @@ ${title}
           </div>
         )}
 
-        <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
-          <p className="text-sm font-medium text-gray-900">수동 후보 시간 관리</p>
-          <p className="mt-1 text-xs text-gray-600">
-            아래 영역은 직접 입력한 후보 시간을 관리하는 곳이에요. 위 추천 시간은 시스템이 Availability를 바탕으로 새로 생성한 결과예요.
+        <details className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100">
+          <summary className="cursor-pointer text-sm font-medium text-gray-900">
+            수동 후보 시간 관리 열기
+          </summary>
+          <p className="mt-2 text-xs text-gray-600">
+            기본 선택 UX는 위 캘린더 기반 슬롯 선택이고, 이 영역은 직접 후보 시간을 추가하거나 조정할 때만
+            사용해요.
           </p>
-        </div>
-
-        <SlotCandidatesSection
-          meetingRequestId={requestId}
-          onSlotsChanged={fetchDetail}
-          availabilityItems={availabilityItems}
-        />
+          <div className="mt-4">
+            <SlotCandidatesSection
+              meetingRequestId={requestId}
+              onSlotsChanged={fetchDetail}
+              availabilityItems={availabilityItems}
+            />
+          </div>
+        </details>
 
         <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
           <div className="mb-4 flex items-center justify-between">
